@@ -1,5 +1,9 @@
 .env
-/data
-**/__pycache__
+.ruff_cache
 
+/data
+/models
+/tokenizers
+**/__pycache__
 **OOP.py
+**possible_spacy_implementation.py

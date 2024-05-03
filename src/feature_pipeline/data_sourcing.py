@@ -4,11 +4,9 @@ more functions than I had intended to write because of the
 need to take care of the possibility of things like missing data.
 """
 
-
 import os 
-
-import requests 
 import tarfile 
+import requests 
 
 from tqdm import tqdm
 from pathlib import Path 
@@ -19,6 +17,7 @@ from src.setup.paths import DATA_DIR
 languages = {
     "bulgarian": "bg", 
     "czech": "cs", 
+    "english": "en",
     "french": "fr",
     "german": "de", 
     "greek": "el", 
@@ -33,7 +32,8 @@ languages = {
     "portuguese": "pt",
     "romanian": "ro",
     "slovak": "sk",
-    "slovene": "sl",
+    "slovenian": "sl",
+    "slovene":"sl",
     "swedish": "sv"
     }
 
@@ -62,9 +62,8 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
     destination_path = DATA_DIR/folder_name
 
     if available_language(source_lang=source_lang):
-        
-        if source_lang.lower() in languages.keys():
-            source_lang = languages[source_lang.lower()]   
+
+        allow_full_names(source_lang=source_lang) 
 
         logger.info("Checking for the presence of folders and tarballs")
         # Both the data folder, and the source tarball already exist
@@ -111,7 +110,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
                       
         elif not data_folder_exists(source_lang=source_lang) and tarball_exists(source_lang=source_lang):
             # The folder does not exist, but the tarball does (and needs to be extracted)
-            extract_tarball(
+            fully_extract_tarball(
                 archive_path=tarball_path,
                 destination_path=destination_path,
                 keep_tarball=keep_tarball
@@ -190,7 +189,7 @@ def get_tarball(
                 os.mkdir(destination_path)
 
                 logger.info("Extracting the contents of the tarball...")
-                extract_tarball(
+                fully_extract_tarball(
                     archive_path=tarball_path, 
                     destination_path=destination_path, 
                     keep_tarball=keep_tarball
@@ -253,7 +252,7 @@ def tarball_exists(source_lang: str) -> bool:
     return True if Path(DATA_DIR/archive_name).exists() else False
 
 
-def extract_tarball(archive_path: Path, destination_path: Path, keep_tarball:bool = True):
+def fully_extract_tarball(archive_path: Path, destination_path: Path, keep_tarball:bool = True):
     """
     Extract the downloaded tarball to the named path, and delete it if instructed.
 
@@ -371,7 +370,18 @@ def extract_missing_files(tarball_path: Path, destination_path: Path, source_lan
             archive.extract(member=missing_file_names[i], path=destination_path)
             
 
+def allow_full_names(source_lang: str):
+
+    """
+    Ensure that if the full name of the source language is entered,
+    it will be converted into its abbreviated form for later use 
+    elsewhere in the code. 
+    """
+    if source_lang.lower() in languages.keys():
+            source_lang = languages[source_lang.lower()]   
+
+
 if __name__== "__main__":
 
-    for lang in languages.keys():
-        download_data(source_lang=lang, keep_tarball=False)
+    for language in languages.keys():
+        download_data(source_lang=language, keep_tarball=False)
