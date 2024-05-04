@@ -17,7 +17,6 @@ from src.setup.paths import DATA_DIR
 languages = {
     "bulgarian": "bg", 
     "czech": "cs", 
-    "english": "en",
     "french": "fr",
     "german": "de", 
     "greek": "el", 
@@ -156,8 +155,7 @@ def get_tarball(
                   - the download could not be completed due to an exception that occured
                     during the handling of the HTTP request
     """
-
-    URL = f"https://www.statmt.org/europarl/v7/{archive_name}"
+    URL = f"{os.environ("DATA_SOURCE")}{archive_name}"
 
     try:
         logger.info("Downloading the tarball...")
