@@ -2,6 +2,7 @@
 .ruff_cache
 
 /data
+/.idea
 /models
 /tokenizers
 **/__pycache__
