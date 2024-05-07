@@ -5,13 +5,13 @@ from pathlib import Path
 PARENT_DIR = Path("_file_").parent.resolve().parent
 
 DATA_DIR = PARENT_DIR/"data"
-MODELS_DIR = PARENT_DIR/"models"
+SAVED_MODELS_DIR = PARENT_DIR/"saved_models"
 TOKENIZERS_DIR = PARENT_DIR/"tokenizers"
 
 
 def make_fundamental_paths():
 
-    for path in [DATA_DIR, TOKENIZERS_DIR, MODELS_DIR]:
+    for path in [DATA_DIR, TOKENIZERS_DIR, SAVED_MODELS_DIR]:
         if not Path(path).exists():
             os.mkdir(path)
         else:
