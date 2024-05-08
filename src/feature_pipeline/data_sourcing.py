@@ -62,7 +62,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
 
     if available_language(source_lang=source_lang):
 
-        allow_full_names(source_lang=source_lang) 
+        allow_full_language_names(source_lang=source_lang) 
 
         logger.info("Checking for the presence of folders and tarballs")
         # Both the data folder, and the source tarball already exist
@@ -368,8 +368,7 @@ def extract_missing_files(tarball_path: Path, destination_path: Path, source_lan
             archive.extract(member=missing_file_names[i], path=destination_path)
             
 
-def allow_full_names(source_lang: str):
-
+def allow_full_language_names(source_lang: str):
     """
     Ensure that if the full name of the source language is entered,
     it will be converted into its abbreviated form for later use 

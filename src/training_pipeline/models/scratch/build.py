@@ -116,4 +116,5 @@ def build_transformer(
     for parameter in transformer.parameters():
         if parameter.dim() > 1:
              init.xavier_uniform(parameter)
-
+    
+    return transformer

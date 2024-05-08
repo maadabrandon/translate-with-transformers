@@ -19,6 +19,11 @@ def make_fundamental_paths():
 
 
 def make_tokenizer_paths():
+
+    """
+    Create the directories where the individualtokenizers are going to
+    be stored.
+    """
     
     from src.feature_pipeline.data_sourcing import languages
 
