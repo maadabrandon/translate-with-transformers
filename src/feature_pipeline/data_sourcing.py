@@ -62,7 +62,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
 
     if available_language(source_lang=source_lang):
 
-        allow_full_language_names(source_lang=source_lang) 
+        source_lang = allow_full_language_names(source_lang=source_lang) 
 
         logger.info("Checking for the presence of folders and tarballs")
         # Both the data folder, and the source tarball already exist
@@ -236,6 +236,7 @@ def data_folder_exists(source_lang:str) -> bool:
         bool: whether it exists or not
     """
     folder_name = f"{source_lang.lower()}-en"
+
     return True if Path(DATA_DIR/folder_name).exists() else False
 
 
@@ -247,6 +248,7 @@ def tarball_exists(source_lang: str) -> bool:
         bool: whether it exists or not
     """
     archive_name = f"{source_lang.lower()}-en.tgz"
+    
     return True if Path(DATA_DIR/archive_name).exists() else False
 
 
@@ -375,7 +377,10 @@ def allow_full_language_names(source_lang: str):
     elsewhere in the code. 
     """
     if source_lang.lower() in languages.keys():
-            source_lang = languages[source_lang.lower()]   
+        return languages[source_lang.lower()] 
+
+    elif source_lang.lower() in languages.values():
+        return source_lang.lower()
 
 
 if __name__== "__main__":

@@ -1,38 +1,32 @@
 import os 
 from pathlib import Path 
 
-
-PARENT_DIR = Path("_file_").parent.resolve().parent
+PARENT_DIR = Path("_file_").parent.resolve()
 
 DATA_DIR = PARENT_DIR/"data"
 SAVED_MODELS_DIR = PARENT_DIR/"saved_models"
-TOKENIZERS_DIR = PARENT_DIR/"tokenizers"
+TOKENS_DIR = PARENT_DIR/"tokens"
 
 
 def make_fundamental_paths():
 
-    for path in [DATA_DIR, TOKENIZERS_DIR, SAVED_MODELS_DIR]:
+    for path in [DATA_DIR, TOKENS_DIR, SAVED_MODELS_DIR]:
         if not Path(path).exists():
             os.mkdir(path)
         else:
             continue
 
 
-def make_tokenizer_paths():
-
+def make_tokenizer_path(source_lang: str):
     """
-    Create the directories where the individualtokenizers are going to
-    be stored.
+    Create the directories where the individualtokenizers are going to be stored.
     """
-    
     from src.feature_pipeline.data_sourcing import languages
 
-    for lang in languages.values():
+    if source_lang.lower() in languages.keys() or languages.values():
 
-        if not Path(TOKENIZERS_DIR/f"{lang}-en").exists():
-            os.mkdir(TOKENIZERS_DIR/f"{lang}-en")
-        else:
-            continue
+        if not Path(TOKENS_DIR/f"{source_lang}-en").exists():
+            os.mkdir(TOKENS_DIR/f"{source_lang}-en")
         
 
 if __name__ == "__main__":
