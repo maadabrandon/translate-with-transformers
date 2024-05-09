@@ -1,6 +1,8 @@
 import os 
 import json
 
+import torch
+
 from pathlib import Path
 
 from loguru import logger
@@ -45,7 +47,11 @@ class BilingualData():
         self.en_tokens = self._get_tokens(dataset=self.en_text, token_file_name="en_tokens.json")
         self.source_tokens = self._get_tokens(dataset=self.source_text, token_file_name=f"{self.source_lang}_tokens.json")
 
-    
+        self.sos_id = torch.tensor(data=[self.source_tokens["[SOS]"]], dtype=int64)
+        self.eos_id = torch.tensor(data=[self.source_tokens["[EOS]"]], dtype=int64)
+        self.pad_token = torch.tensor(data=[self.source_tokens["[PAD]"]], dtype=int64)
+
+
     def _load_text(self, language: str) -> list[str]:
         """
         Access and read the text written in the specified language, or its
@@ -113,4 +119,40 @@ class BilingualData():
                 tokens = json.load(file)
 
             return tokens["model"]["vocab"]
+        
+    
+class TransformerInputs():
 
+    def __init__(self, seq_length: int, data: BilingualData):
+
+        self.seq_length = seq_lengths
+        self.encoder_input_tokens = data.source_tokens.values()
+        self.decoder_input_tokens = data.en_tokens.values()
+        
+        self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
+        self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
+
+        self.encoder_input = torch.cat(
+            [
+                data.sos_id,
+                torch.tensor(self.encoder_input_tokens, dtype=torch.int64),
+                data.eos_id,
+                torch.tensor([data.pad_token] * self.encoder_num_padding_tokens, dtype=torch.int64)
+            ]
+        )
+
+        self.decoder_input = torch.cat(
+            [
+                data.sos_id,
+                torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
+                data.en_tokens["[EOS]"],
+                torch.tensor([data.pad_token] * self.decoder_num_padding_tokens, dtype=torch.int64)
+            ]
+        )
+
+
+    def _enough_tokens(self, seq_length: int):
+
+        if self.encoder_num_padding_tokens < 0 or self.decoder_num_padding_tokens < 0:
+
+            raise ValueError("Sentence is too long")
