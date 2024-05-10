@@ -5,7 +5,7 @@ the paper which introduced the architecture: "Attention is All You Need"
 
 import torch
 from math import sqrt, log
-from torch.nn import Linear, Module, Dropout, Embedding, Parameter, ModuleList
+from torch.nn import Linear, Module,  Dropout, Embedding, Parameter, ModuleList
 
 
 class InputEmbedding(Module):
@@ -124,22 +124,22 @@ class FeedForwardBlock(Module):
 
 class MultiHeadAttention(Module):
 
-    def __init__(self, d_model: int, h: int, dropout: float) -> None:
+    def __init__(self, d_model: int, heads: int, dropout: float) -> None:
         super().__init__()
-        self.h = h
+        self.heads = heads
         self.d_model = d_model
-        self.d_k = d_model // h
+        self.d_k = d_model // heads
         self.dropout = Dropout(p=dropout)
         self.attention_scores = None
 
-        assert d_model % h == 0, \
-            f"Size of the embedding dimension ({d_model}) not divisible by the number of heads ({h})"
+        assert self.d_model % self.heads == 0, \
+            f"Size of the embedding dimension ({d_model}) not divisible by the number of heads ({heads})"
 
         # Define matrices used to transform the query, key, and values respectively
         self.w_k = Linear(in_features=d_model, out_features=d_model)
         self.w_q = Linear(in_features=d_model, out_features=d_model)
         self.w_v = Linear(in_features=d_model, out_features=d_model)
-        self.w_o = Linear(in_features=h * self.d_k, out_features=d_model)
+        self.w_o = Linear(in_features=heads * self.d_k, out_features=d_model)
 
     @staticmethod
     def compute_attention(
@@ -192,10 +192,10 @@ class MultiHeadAttention(Module):
         value = self.w_v(v)
 
         # We now split the matrices in such a way that each head views the
-        # (Batch, seq_length, d_model) --> (Batch, seq_length, h, d_k) --> (Batch, h, seq_length, d_k)
-        query = query.view(query.shape[0], query.shape[1], self.h, self.d_k).transpose(1, 2)
-        key = key.view(key.shape[0], key.shape[1], self.h, self.d_k).transpose(1, 2)
-        value = value.view(value.shape[0], value.shape[1], self.h, self.d_k).transpose(1, 2)
+        # (Batch, seq_length, d_model) --> (Batch, seq_length, heads, d_k) --> (Batch, heads, seq_length, d_k)
+        query = query.view(query.shape[0], query.shape[1], self.heads, self.d_k).transpose(1, 2)
+        key = key.view(key.shape[0], key.shape[1], self.heads, self.d_k).transpose(1, 2)
+        value = value.view(value.shape[0], value.shape[1], self.heads, self.d_k).transpose(1, 2)
 
         # Compute self-attention scores
         x, self.attention_scores = MultiHeadAttention.compute_attention(
@@ -207,8 +207,8 @@ class MultiHeadAttention(Module):
         )
 
         # Restore the x to its original shape.
-        # (Batch, h, seq_length, d_k) --> (Batch, seq_length, h, d_k) --> (Batch, seq_length, d_model)
-        x = x.transpose(dim0=1, dim1=2).contiguous().view(x.shape[0], x.shape[1], self.h * self.d_k)
+        # (Batch, heads, seq_length, d_k) --> (Batch, seq_length, heads, d_k) --> (Batch, seq_length, d_model)
+        x = x.transpose(dim0=1, dim1=2).contiguous().view(x.shape[0], x.shape[1], self.heads * self.d_k)
 
         return self.w_o(x)
 
