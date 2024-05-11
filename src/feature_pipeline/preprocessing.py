@@ -11,15 +11,14 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
-from torch.utils.tensorboard import SummaryWriter
-from torch.utils.data import random_split
+from optuna.trial import Trial
 
-from sklearn.model_selection import KFold, train_test_split
-from optuna import trial
+from torchtext.data import Field, BucketIterator
+from torchtext.datasets import TranslationDataset
+from torch.utils.data import Dataset, DataLoader, random_split
 
-from src.feature_pipeline.data_sourcing import languages
 from src.setup.paths import DATA_DIR, TOKENS_DIR, make_tokenizer_path
-from src.feature_pipeline.data_sourcing import languages, allow_full_language_names, download_data
+from src.feature_pipeline.data_sourcing import languages, allow_full_language_names
 
 
 class BilingualData():
@@ -44,15 +43,32 @@ class BilingualData():
         self.en_text = self._load_text(language="en")   
         self.source_text = self._load_text(language=self.source_lang)
 
-        # Tokenize the English and {source language} texts
-        self.en_tokens = self._get_tokens(dataset=self.en_text, token_file_name="en_tokens.json")
-        self.source_tokens = self._get_tokens(dataset=self.source_text, token_file_name=f"{self.source_lang}_tokens.json")
+        # Tokenize the {source language} texts
+        self.source_lang_field = Field(
+            tokenize=self._tokenize(dataset=self.source_text, token_file_name=f"{self.source_lang}_tokens.json"),
+            init_token="<SOS>",
+            eos_token="<EOS>",
+            pad_token="<PAD>",
+            lower=True
+        )
 
-        # These tokens have the same IDs in both the source language and English, so it
-        # doesn't matter that I'm using the only source language files to get the IDs here.
-        self.sos_id = torch.tensor(data=[self.source_tokens["[SOS]"]], dtype=int64)
-        self.eos_id = torch.tensor(data=[self.source_tokens["[EOS]"]], dtype=int64)
-        self.pad_id = torch.tensor(data=[self.source_tokens["[PAD]"]], dtype=int64)
+        # Tokenize the English texts
+        self.en_field = Field(
+            tokenize=self._tokenize(dataset=self.en_text, token_file_name="en_tokens.json"),
+            init_token="<SOS>",
+            eos_token="<EOS>",
+            pad_token="<PAD>",
+            lower=True
+        )
+
+        self.translation_data = TranslationDataset(
+            path=f"{self.folder_path}/",
+            exts=(self.source_text_name, self.en_text_name),
+            fields=(self.source_lang_field, self.en_field)
+        )
+
+        self.source_lang_vocab = self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
+        self.source_lang_vocab = self.en_field.build_vocab(self.translation_data, min_freq=2)
 
 
     def _load_text(self, language: str) -> list[str]:
@@ -91,46 +107,24 @@ class BilingualData():
         Returns:
             dict: .json file that contains the tokens and their corresponding IDs
         """
-        # If an unknown word is encountered, the tokenizer will map it to the number which corresponds to "UNK"
-        tokenizer = Tokenizer(
-            model=WordLevel(unk_token="UNK")
-        )   
-    
-        # Choose the whitespace pre-tokenizer 
-        tokenizer.pre_tokenizer = Whitespace()
-        trainer = WordLevelTrainer(special_tokens=["[UNK]", "[PAD]", "[SOS]", "[EOS]"], min_frequency=2)
-
-        # Perform tokenization
-        tokenizer.train_from_iterator(iterator=dataset, trainer=trainer)
-
-        # Save the tokens
-        tokenizer.save(path=f"{self.tokens_path}/{token_file_name}.json")
-
-        # Get the tokens    
-        self._get_tokens(dataset=dataset, token_file_name=token_file_name)
-
-
-    def _get_tokens(self, dataset: list[str], token_file_name: str) -> dict:
-        """
-        Tokenize the file, or retrieve the tokens if the tokens already exist
-        in their appropriate folder.
-
-        Returns:
-            dict : the tokens and their respective IDs
-        """
-
         if not Path(self.tokens_path/token_file_name).exists():
-            self._tokenize(dataset=dataset, token_file_name=token_file_name)
 
-        elif Path(self.tokens_path/token_file_name).exists():
-
-            # Get the tokens if it is already present
-            with open(self.tokens_path/token_file_name, mode="r") as file:
-                tokens = json.load(file)
-
-            return tokens["model"]["vocab"]
+            # If an unknown word is encountered, the tokenizer will map it to the number which corresponds to "UNK"
+            tokenizer = Tokenizer(
+                model=WordLevel(unk_token="UNK")
+            )   
         
-    
+            # Choose the whitespace pre-tokenizer 
+            tokenizer.pre_tokenizer = Whitespace()
+            trainer = WordLevelTrainer(special_tokens=["<UNK>", "<PAD>", "<SOS>", "<EOS>"], min_frequency=2)
+
+            # Perform tokenization
+            tokenizer.train_from_iterator(iterator=dataset, trainer=trainer)
+
+            # Save the tokens
+            tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+            
+
 class TransformerInputs():
 
     def __init__(self, seq_length: int, data: BilingualData) -> None:
@@ -235,3 +229,57 @@ class TransformerInputs():
         
         mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int)
         return mask == 0
+
+
+class DataSplit():
+
+    def __init__(self, source_lang: str) -> None:
+        
+        self.source_lang = source_lang
+        self.data = BilingualData(source_lang=self.source_lang)
+        
+        self.train_iterator = BucketIterator(
+            dataset=self.data.translation_data,    def _get_tokens(self, dataset: list[str], token_file_name: str) -> dict:
+        """
+        Tokenize the file, or retrieve the tokens if the tokens already exist
+        in their appropriate folder.
+
+        Returns:
+            dict : the tokens and their respective IDs
+        """
+
+        if not Path(self.tokens_path/token_file_name).exists():
+            self._tokenize(dataset=dataset, token_file_name=token_file_name)
+
+        elif Path(self.tokens_path/token_file_name).exists():
+
+            # Get the tokens if it is already present
+            with open(self.tokens_path/token_file_name, mode="r") as file:
+                tokens = json.load(file)
+
+            return tokens["model"]["vocab"]
+            batch_size=20
+        )
+
+    def _split_data(self):
+
+       self.train, self.val, self.test = TranslationDataset.splits(
+        fields=(self.data.source_lang_field, self.data.en_field),
+        exts=(self.data.source_text_name, self.data.en_text_name),
+        path=self.data.folder_path,
+        train="train",
+        validation="val",
+        test="test" 
+       )
+
+       print(
+        len(self.train.examples())
+       )
+
+       print(
+        len(self.val.examples())
+       )
+
+       print(
+        len(self.test.examples())
+       )

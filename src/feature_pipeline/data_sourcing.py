@@ -54,6 +54,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
         keep_tarball: a boolean that allows us to specify whether or not we want to 
                       delete the tarball (the initial download) after extraction.
     """
+
     folder_name = f"{source_lang.lower()}-en"
     archive_name = f"{folder_name}.tgz"
 
@@ -386,4 +387,7 @@ def allow_full_language_names(source_lang: str):
 if __name__== "__main__":
 
     for language in languages.keys():
-        download_data(source_lang=language, keep_tarball=False)
+        download_data(
+            source_lang=allow_full_language_names(source_lang=language), 
+            keep_tarball=False
+        )
