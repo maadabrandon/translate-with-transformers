@@ -4,20 +4,21 @@ from pathlib import Path
 PARENT_DIR = Path("_file_").parent.resolve()
 
 DATA_DIR = PARENT_DIR/"data"
+ORIGINAL_DATA_DIR = DATA_DIR/"originals"
 SAVED_MODELS_DIR = PARENT_DIR/"saved_models"
 TOKENS_DIR = PARENT_DIR/"tokens"
 
 
 def make_fundamental_paths():
 
-    for path in [DATA_DIR, TOKENS_DIR, SAVED_MODELS_DIR]:
+    for path in [DATA_DIR, ORIGINAL_DATA_DIR, TOKENS_DIR, SAVED_MODELS_DIR]:
         if not Path(path).exists():
             os.mkdir(path)
         else:
             continue
 
 
-def make_tokenizer_path(source_lang: str):
+def make_token_path(source_lang: str):
     """
     Create the directories where the individualtokenizers are going to be stored.
     """

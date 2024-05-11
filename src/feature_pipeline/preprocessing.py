@@ -11,13 +11,11 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
-from optuna.trial import Trial
-
 from torchtext.data import Field, BucketIterator
 from torchtext.datasets import TranslationDataset
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader
 
-from src.setup.paths import DATA_DIR, TOKENS_DIR, make_tokenizer_path
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, TOKENS_DIR, make_token_path
 from src.feature_pipeline.data_sourcing import languages, allow_full_language_names
 
 
@@ -32,7 +30,7 @@ class BilingualData():
         make_tokenizer_path(source_lang=self.source_lang)
 
         # The directories where the data and its tokenizers will be saved
-        self.folder_path = DATA_DIR/f"{self.source_lang}-en"
+        self.folder_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
         self.tokens_path = TOKENS_DIR/f"{self.source_lang}-en"
 
         # The names of the files in the dataset
@@ -233,53 +231,88 @@ class TransformerInputs():
 
 class DataSplit():
 
-    def __init__(self, source_lang: str) -> None:
+    def __init__(self, source_lang: str, train_size: float, val_size: float) -> None:
         
+        self.train_size = train_size
+        self.val_size = val_size
+        self.test_size = 1 - self.train_size - self.val_size
+
         self.source_lang = source_lang
         self.data = BilingualData(source_lang=self.source_lang)
         
-        self.train_iterator = BucketIterator(
-            dataset=self.data.translation_data,    def _get_tokens(self, dataset: list[str], token_file_name: str) -> dict:
-        """
-        Tokenize the file, or retrieve the tokens if the tokens already exist
-        in their appropriate folder.
+        self.source_train_size = int(len(self.data.source_text) * self.train_size)
+        self.source_val_size = int(len(self.data.source_text) * self.val_size)
+        self.source_test_size = int(len(self.data.source_text) * self.test_size)
 
-        Returns:
-            dict : the tokens and their respective IDs
-        """
+        self.en_train_size = int(len(self.data.en_text) * self.train_size)
+        self.en_val_size = int(len(self.data.en_text) * self.val_size)
+        self.en_test_size = int(len(self.data.en_text) * self.test_size)
 
-        if not Path(self.tokens_path/token_file_name).exists():
-            self._tokenize(dataset=dataset, token_file_name=token_file_name)
+        self.source_train_indices = list(range(self.source_train_size))
+        self.source_val_indices = list(range(self.source_val_size))
+        self.source_test_indices = list(range(self.source_test_size))
 
-        elif Path(self.tokens_path/token_file_name).exists():
+        self.en_train_indices = list(range(self.en_train_size))
+        self.en_val_indices = list(range(self.en_val_size))
+        self.en_test_indices = list(range(self.en_test_size))
 
-            # Get the tokens if it is already present
-            with open(self.tokens_path/token_file_name, mode="r") as file:
-                tokens = json.load(file)
-
-            return tokens["model"]["vocab"]
-            batch_size=20
-        )
+        self.splits_location = DATA_DIR/"split_data"/f"{self.source_lang}-en"
 
     def _split_data(self):
 
-       self.train, self.val, self.test = TranslationDataset.splits(
-        fields=(self.data.source_lang_field, self.data.en_field),
-        exts=(self.data.source_text_name, self.data.en_text_name),
-        path=self.data.folder_path,
-        train="train",
-        validation="val",
-        test="test" 
-       )
+        logger.info("Creating splits for each language")
 
-       print(
-        len(self.train.examples())
-       )
+        self.source_train_data = [self.data.source_text[i] for i in self.source_train_indices]
+        self.en_train_data = [self.data.en_text[i] for i in self.en_train_indices]
 
-       print(
-        len(self.val.examples())
-       )
+        self.source_val_data = [self.data.source_text[i] for i in self.source_val_indices]
+        self.en_val_data = [self.data.en_text[i] for i in self.en_val_indices]
+        
+        self.source_test_data = [self.data.source_text[i] for i in self.source_test_indices]
+        self.en_test_data = [self.data.en_text[i] for i in self.en_test_indices]
+        
+        self._save_all_split_data()
 
-       print(
-        len(self.test.examples())
-       )
+
+    def _save_all_split_data(self):
+
+        options = {
+            ("train", self.source_lang): self.source_train_data,
+            ("val", self.source_lang): self.source_val_data,
+            ("test", self.source_lang): self.source_test_data,
+            ("train", "en"): self.en_train_data,
+            ("val", "en"): self.en_val_data,
+            ("test", "en"): self.en_test_data,
+        }
+
+        for option in tqdm(options.keys()):
+            
+            logger.info(f"Saving Split {list(options.keys()).index(option)}")
+
+            self._save_file_as_txt(
+                data_split=options[option],
+                file_name=f"{option[0]}_europarl-v7.{self.source_lang}-en.{option[1]}"
+            )
+
+
+    def _save_file_as_txt(self, data_split: list[str], file_name: str):
+
+        with open(self.splits_location/file_name, mode="w", encoding="utf-8") as text:
+            
+            logger.info("Writing the strings to the file")
+
+            for strings in tqdm(data_split):
+                text.write(strings)
+    
+    
+    def _make_translation_dataset(self):
+
+        self.train, self.val, self.test = TranslationDataset.splits(
+            fields=(self.data.source_lang_field, self.data.en_field),
+            exts=(self.data.source_text_name, self.data.en_text_name),
+            path=self.splits_location,
+            train="train_",
+            validation="val_",
+            test="test_" 
+        )
+    
