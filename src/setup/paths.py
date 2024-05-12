@@ -18,7 +18,7 @@ def make_fundamental_paths():
             continue
 
 
-def make_token_path(source_lang: str):
+def make_path_to_tokens(source_lang: str):
     """
     Create the directories where the individualtokenizers are going to be stored.
     """
@@ -33,4 +33,4 @@ def make_token_path(source_lang: str):
 if __name__ == "__main__":
 
     make_fundamental_paths()
-    make_tokenizer_paths()
+    make_path_to_tokens()

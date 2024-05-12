@@ -11,7 +11,7 @@ import requests
 from tqdm import tqdm
 from pathlib import Path 
 from loguru import logger 
-from src.setup.paths import DATA_DIR
+from src.setup.paths import ORIGINAL_DATA_DIR
 
 # The languages for which data is available
 languages = {
@@ -58,8 +58,8 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
     folder_name = f"{source_lang.lower()}-en"
     archive_name = f"{folder_name}.tgz"
 
-    tarball_path = DATA_DIR/archive_name
-    destination_path = DATA_DIR/folder_name
+    tarball_path = ORIGINAL_DATA_DIR/archive_name
+    destination_path = ORIGINAL_DATA_DIR/folder_name
 
     if available_language(source_lang=source_lang):
 
@@ -156,10 +156,10 @@ def get_tarball(
                   - the download could not be completed due to an exception that occured
                     during the handling of the HTTP request
     """
-    URL = f"{os.environ("DATA_SOURCE")}{archive_name}"
+    URL = f"https://www.statmt.org/europarl/v7/{archive_name}"
 
     try:
-        logger.info("Downloading the tarball...")
+        logger.info(f"Downloading the tarball for {source_lang}-en ...")
         response = requests.get(url=URL)
 
         if response.status_code == 200:
@@ -238,7 +238,7 @@ def data_folder_exists(source_lang:str) -> bool:
     """
     folder_name = f"{source_lang.lower()}-en"
 
-    return True if Path(DATA_DIR/folder_name).exists() else False
+    return True if Path(ORIGINAL_DATA_DIR/folder_name).exists() else False
 
 
 def tarball_exists(source_lang: str) -> bool:
@@ -250,7 +250,7 @@ def tarball_exists(source_lang: str) -> bool:
     """
     archive_name = f"{source_lang.lower()}-en.tgz"
     
-    return True if Path(DATA_DIR/archive_name).exists() else False
+    return True if Path(ORIGINAL_DATA_DIR/archive_name).exists() else False
 
 
 def fully_extract_tarball(archive_path: Path, destination_path: Path, keep_tarball:bool = True):

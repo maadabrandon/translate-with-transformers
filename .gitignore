@@ -6,7 +6,7 @@
 /models
 /tokens
 **/__pycache__
-**OOP.py
+**OOP_data_sourcing.py
 **spacy_implementation.py
 
 README.md
