@@ -1,5 +1,12 @@
 .env
-/data
-**/__pycache__
+.ruff_cache
 
-**OOP.py
+/data
+/.idea
+/models
+/tokens
+**/__pycache__
+**OOP_data_sourcing.py
+**spacy_implementation.py
+
+README.md
