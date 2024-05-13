@@ -270,7 +270,7 @@ class EncoderBlock(Module):
 
 class Encoder(Module):
 
-    def __init__(self, layers: ModuleList[EncoderBlock]) -> None:
+    def __init__(self, layers: ModuleList) -> None:
         super().__init__()
         self.layers = layers
         self.norm = LayerNormalization()
@@ -325,7 +325,7 @@ class DecoderBlock(Module):
 
 class Decoder(Module):
 
-    def __init__(self, layers: ModuleList[DecoderBlock]):
+    def __init__(self, layers: ModuleList):
         super().__init__()
         self.layers = layers
         self.norm = LayerNormalization()
@@ -342,7 +342,7 @@ class Decoder(Module):
         return self.norm(x)
 
 
-class VocabProjectionLayer(Module):
+class ProjectionLayer(Module):
     """
     This is a linear map that acts on the embedding (feature) dimension and
     transforms its input tensor so that its feature dimension corresponds to
@@ -379,7 +379,7 @@ class Transformer(Module):
         target_embed: InputEmbedding,
         source_position: PositionalEncoding,
         target_position: PositionalEncoding,
-        projection_layer: VocabProjectionLayer
+        projection_layer: ProjectionLayer
     ) -> None:
 
         super().__init__()

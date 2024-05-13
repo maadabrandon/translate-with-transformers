@@ -31,6 +31,5 @@ def make_path_to_tokens(source_lang: str):
         
 
 if __name__ == "__main__":
-
     make_fundamental_paths()
     make_path_to_tokens()

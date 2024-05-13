@@ -19,7 +19,7 @@ from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, TOKENS_DIR, make_path_t
 from src.feature_pipeline.data_sourcing import languages, allow_full_language_names
 
 
-class BilingualData():
+class BilingualData(Dataset):
 
     def __init__(self, source_lang: str) -> None:
         
@@ -311,11 +311,10 @@ class TransformerInputs():
         """
 
         if self.encoder_num_padding_tokens < 0 or self.decoder_num_padding_tokens < 0:
-
             raise ValueError("Sentence is too long")
 
 
-    def __get_items(self) -> dict:
+    def __getitem__(self) -> dict:
         """
         Return the encoder and decoder inputs, which are both of dimension 
         (seq_length, ), as well as the encoder and decoder masks.
@@ -360,7 +359,5 @@ class TransformerInputs():
 if __name__ == "__main__":
 
     for language in languages.values():
-
         if language != "de":
-
             make_data_loaders(source_lang=language)

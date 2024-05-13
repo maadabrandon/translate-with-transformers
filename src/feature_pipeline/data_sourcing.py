@@ -274,9 +274,8 @@ def fully_extract_tarball(archive_path: Path, destination_path: Path, keep_tarba
 
 
 def missing_data_files(path: Path, source_lang: str) -> bool:
-
     """
-    Looks into a given data folder, and determines whether :
+    Looks into a given data folder, and determines whether:
         - both data files exist
         - whether there is at least one missing file
         - whether there are more files than there should be 
@@ -286,7 +285,6 @@ def missing_data_files(path: Path, source_lang: str) -> bool:
               False if there are no missing files, and if 
               there are more files than there should be.
     """
-
     num_files = len(os.listdir(path=path)) 
 
     if both_data_files_exist(path=path, source_lang=source_lang):
