@@ -7,7 +7,7 @@ from torch.optim import Adam, SGD, RMSprop
 
 from src.training_pipeline.models.scratch.components import Transformer
 from src.training_pipeline.models.scratch.construction import build_transformer
-from src.feature_pipeline.preprocessing import make_data_loaders, TransformerInputs
+from src.feature_pipeline.preprocessing import make_data_loaders, BilingualData, DataSplit, TransformerInputs
 
 
 def get_optimizer(
@@ -62,3 +62,41 @@ def get_optimizer(
     else:
         raise NotImplementedError("We only accept the Adam, SGD, and RMS optimizers")
 
+
+def run_training_loop(
+    source_lang: str,
+    data_loaders: tuple[DataLoader, DataLoader, DataLoader],
+    model_fn: Transformer,
+    criterion: callable,
+    optimizer: Adam|SGD|RMSprop,
+    num_epochs: int,
+    batch_size: int,
+    save: bool
+):
+    logger.info("Collecting training data...")
+
+    data = BilingualData(source_lang=source_lang) 
+    model_inputs = TransformerInputs(seq_length=30, data=data)
+    data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
+
+    train_loader = data_split._make_data_loaders(source_lang=source_lang)[0]
+    train_iterator = iter(train_loader)
+
+    logger.info("Setting training device...")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model_fn.to(device=device)
+
+    logger.info("Training...")
+    for epoch in range(num_epochs):
+        logger.info(f"Starting Epoch {epoch+1}")
+
+        # Put the model in training mode
+        model_fn.train()
+
+        batch_iterator = tqdm(train_loader, desc=f"Processing epoch {epoch+1}")
+
+        for batch in batch_iterator:
+
+            # Prepare transformer inputs 
+            encoder_input = model_inputs.__getitem__()["encoder_input"]
+            decoder_input = model_inputs.__getitem__()["decoder_input"]

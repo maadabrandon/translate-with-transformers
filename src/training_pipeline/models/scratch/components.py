@@ -251,7 +251,7 @@ class EncoderBlock(Module):
             modules=[SkipConnection(dropout=dropout) for _ in [0, 1]]
         )
 
-    def forward(self, x: torch.Tensor, source_mask) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, source_mask: torch.Tensor) -> torch.Tensor:
 
         # Apply the first skip connection to the input tensor x with the sublayer being the self-attention.
         x = self.skip_connections[0].forward(
@@ -303,7 +303,13 @@ class DecoderBlock(Module):
             [SkipConnection(dropout=dropout) for _ in range(3)]
         )
 
-    def forward(self, x: torch.Tensor, encoder_output: torch.Tensor, source_mask, target_mask):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target_mask: torch.Tensor
+        ):
         # First skip connection
         x = self.skip_connections[0].forward(
             x=x,
@@ -330,7 +336,14 @@ class Decoder(Module):
         self.layers = layers
         self.norm = LayerNormalization()
 
-    def forward(self, x: torch.Tensor, encoder_output: torch.Tensor, source_mask, target_mask):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target_mask:torch.Tensor
+        ):
+    
         for layer in self.layers:
             x = layer.forward(
                 x=x,
@@ -380,7 +393,7 @@ class Transformer(Module):
         source_position: PositionalEncoding,
         target_position: PositionalEncoding,
         projection_layer: ProjectionLayer
-    ) -> None:
+        ) -> None:
 
         super().__init__()
         self.encoder = encoder
@@ -392,7 +405,7 @@ class Transformer(Module):
         self.projection_layer = projection_layer
 
 
-    def _encode(self, source, source_mask) -> torch.Tensor:
+    def _encode(self, source, source_mask: torch.Tensor) -> torch.Tensor:
 
         # Apply the input embedding and positional encoding to the data before it enters the encoder blocks
         source = self.source_position(
@@ -402,7 +415,12 @@ class Transformer(Module):
         return self.encoder.forward(x=source, mask=source_mask)
 
 
-    def _decode(self, encoder_output: torch.Tensor, source_mask, target, target_mask) -> torch.Tensor:
+    def _decode(
+        self, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target_mask: torch.Tensor
+        ) -> torch.Tensor:
 
         # Apply the output embedding to the input data
         target = self.target_embed.forward(x=target)

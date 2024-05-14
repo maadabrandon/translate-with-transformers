@@ -33,6 +33,10 @@ class BilingualData(Dataset):
         self.folder_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
         self.tokens_path = TOKENS_DIR/f"{self.source_lang}-en"
 
+        # The paths to the tokens
+        self.source_tokens_path = self.tokens_path/f"{self.source_lang}_tokens.json"
+        self.en_tokens_path = self.tokens_path/"en_tokens.json"
+
         # The names of the files in the dataset
         self.en_text_name = f"europarl-v7.{self.source_lang}-en.en"
         self.source_text_name = f"europarl-v7.{self.source_lang}-en.{self.source_lang}"
@@ -121,6 +125,16 @@ class BilingualData(Dataset):
 
             # Save the tokens
             tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+
+
+    def _retrieve_tokens(self) -> tuple[dict, dict]:
+
+        with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
+            source_tokens = json.load(file1)
+            en_tokens = json.load(file2)
+
+        return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
+
             
 
 class DataSplit():
@@ -131,8 +145,8 @@ class DataSplit():
         self.val_size = val_size
         self.test_size = 1 - self.train_size - self.val_size
 
-        self.data = BilingualData(source_lang=self.source_lang)
         self.source_lang = allow_full_language_names(source_lang=source_lang)
+        self.data = BilingualData(source_lang=self.source_lang)
 
         self.source_train_size = int(len(self.data.source_text) * self.train_size)
         self.source_val_size = int(len(self.data.source_text) * self.val_size)
@@ -220,6 +234,7 @@ class DataSplit():
     def _make_translation_dataset(self) -> tuple[TranslationDataset, TranslationDataset, TranslationDataset]:
         """
         Create the translation dataset object by fetching the saved training, 
+        
         validation, and testing data
         """
         self.train, self.val, self.test = TranslationDataset.splits(
@@ -234,59 +249,53 @@ class DataSplit():
         return self.train, self.val, self.test
 
 
-def make_data_loaders(source_lang: str) -> tuple[DataLoader, DataLoader, DataLoader]:
+    def _make_data_loaders(self, source_lang: str) -> tuple[DataLoader, DataLoader, DataLoader]:
+        
+        # Split the data, and save the splits as separate .txt files
+        self._split_data()
 
-    # Fetch the raw data, and do all the preprocessing necessary to split the data, 
-    # and prepare it for training.
-    raw_data = BilingualData(source_lang=source_lang)
+        # Get the training, validation, and test data as objects of Pytorch's DataSet class
+        train_data, val_data, test_data = self._make_translation_dataset()
 
-    data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
+        # Using a batch size of 20 for now
+        train_dataloader =  DataLoader(dataset=train_data, batch_size=20, shuffle=True)
+        val_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
+        test_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
 
-    # Split the data, and save the splits as separate .txt files
-    data_split._split_data()
-
-    # Get the training, validation, and test data as objects of Pytorch's DataSet class
-    train_data, val_data, test_data = data_split._make_translation_dataset()
-
-    # Using a batch size of 20 for now
-    train_dataloader =  DataLoader(dataset=train_data, batch_size=20, shuffle=True)
-    val_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
-    test_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
-
-    return train_dataloader, val_dataloader, test_dataloader
+        return train_dataloader, val_dataloader, test_dataloader
     
     
 class TransformerInputs():
 
     def __init__(self, seq_length: int, data: BilingualData) -> None:
         self.seq_length = seq_length
-        self.encoder_input_tokens = data.source_tokens.values()
-        self.decoder_input_tokens = data.en_tokens.values()
-        
+        self.encoder_input_tokens = data._retrieve_tokens()[0].values()
+        self.decoder_input_tokens = data._retrieve_tokens()[1].values()
+
         self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
         self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
-
+        
         self.encoder_input = torch.cat(
             [
-                data.sos_id,
+                torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64),
                 torch.tensor(self.encoder_input_tokens, dtype=torch.int64),
-                data.eos_id,
-                torch.tensor([data.pad_id] * self.encoder_num_padding_tokens, dtype=torch.int64)
+                self.encoder_input_tokens["<EOS>"],
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
 
         self.decoder_input = torch.cat(
             [
-                data.sos_id,
+                torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64),
                 torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                torch.tensor([data.pad_id] * self.decoder_num_padding_tokens, dtype=torch.int64)
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
 
         self.label = torch.cat(
-            [
+            [   
                 torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                data.eos_id, 
+                torch.tensor([self.decoder_input_tokens["<SOS>"]], dtype=torch.int64), 
                 torch.tensor([data.pad_id] * self.decoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
@@ -335,8 +344,8 @@ class TransformerInputs():
             "label": self.label,
             "encoder_input": self.encoder_input,
             "decoder_input": self.decoder_input, 
-            "encoder_mask": (self.encoder_input != self.pad_id).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
-            "decoder_mask": (self.decoder_input != self.pad_id).unsqueeze(dim=0).unsqueeze(dim=0).int() \
+            "encoder_mask": (self.encoder_input != self.encoder_input_tokens["<PAD>"]).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
+            "decoder_mask": (self.decoder_input != self.decoder_input_tokens["<PAD>"]).unsqueeze(dim=0).unsqueeze(dim=0).int() \
                             & self._causal_mask(size=self.decoder_input.size(0))
         }
 
@@ -360,4 +369,4 @@ if __name__ == "__main__":
 
     for language in languages.values():
         if language != "de":
-            make_data_loaders(source_lang=language)
+            DataSplit(source_lang=language, train_size=0.7, val_size=0.2)._split_data()
