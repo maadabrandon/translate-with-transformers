@@ -10,7 +10,7 @@ from torch.nn import init, ModuleList
 
 from src.training_pipeline.models.scratch.components import (
     InputEmbedding, PositionalEncoding, MultiHeadAttention, FeedForwardBlock, EncoderBlock, DecoderBlock, Decoder,
-    Encoder, VocabProjectionLayer, Transformer
+    Encoder, ProjectionLayer, Transformer
 )
 
 
@@ -114,7 +114,7 @@ def build_transformer(
     decoder = Decoder(layers=decoder_blocks)
 
     # Initialise the projection layer
-    projection_layer = VocabProjectionLayer(d_model=d_model, vocab_size=target_vocab_size)
+    projection_layer = ProjectionLayer(d_model=d_model, vocab_size=target_vocab_size)
 
     # Make the transformer from these components
     transformer = Transformer(

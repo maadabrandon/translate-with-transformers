@@ -388,8 +388,8 @@ class Transformer(Module):
         self,
         encoder: Encoder,
         decoder: Decoder,
-        source_embed: InputEmbedding,
-        target_embed: InputEmbedding,
+        source_embedding: InputEmbedding,
+        target_embedding: InputEmbedding,
         source_position: PositionalEncoding,
         target_position: PositionalEncoding,
         projection_layer: ProjectionLayer
@@ -398,18 +398,18 @@ class Transformer(Module):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.source_embed = source_embed
-        self.target_embed = target_embed
+        self.source_embedding = source_embedding
+        self.target_embedding = target_embedding
         self.source_position = source_position
         self.target_position = target_position
         self.projection_layer = projection_layer
 
 
-    def _encode(self, source, source_mask: torch.Tensor) -> torch.Tensor:
+    def _encode(self, input: torch.Tensor, source_mask: torch.Tensor) -> torch.Tensor:
 
         # Apply the input embedding and positional encoding to the data before it enters the encoder blocks
         source = self.source_position(
-            self.source_embed(source)
+            self.source_embedding.forward(input)
         )
 
         return self.encoder.forward(x=source, mask=source_mask)
@@ -419,11 +419,12 @@ class Transformer(Module):
         self, 
         encoder_output: torch.Tensor, 
         source_mask: torch.Tensor, 
+        target: torch.Tensor,
         target_mask: torch.Tensor
         ) -> torch.Tensor:
 
         # Apply the output embedding to the input data
-        target = self.target_embed.forward(x=target)
+        target = self.target_embedding.forward(x=target)
 
         # Apply the positional embedding to the data before it enters the decoder blocks
         target = self.target_position.forward(x=target)

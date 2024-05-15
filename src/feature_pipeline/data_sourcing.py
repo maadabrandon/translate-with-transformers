@@ -85,11 +85,11 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
             if not keep_tarball:
                 os.remove(path=tarball_path)
 
-            logger.success(f'The folder "{folder_name}" already exists')
+            logger.success(f"The folder {folder_name} already exists")
 
         # The folder exists, but not the tarball
         elif data_folder_exists(source_lang=source_lang) and not tarball_exists(source_lang=source_lang):
-            logger.success(f'The folder "{folder_name}" already exists')
+            logger.success(f"The folder {folder_name} already exists")
 
             logger.info("Checking for missing files...")
             if missing_data_files(path=destination_path, source_lang=source_lang):
@@ -119,7 +119,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
         # The data needs to be downloaded from scratch
         else:
             get_tarball(
-                source_lang=source_lang,
+                source_lang=source_lang, 
                 archive_name=archive_name, 
                 destination_path=destination_path, 
                 tarball_path=tarball_path,
@@ -170,8 +170,7 @@ def get_tarball(
                 total=int(response.headers.get("content-length", 0))
             )
 
-            logger.success("Done!")
-            logger.info(" Writing to disk...")
+            pieces.set_description(" Writing to disk...")
             
             # Save the download with an accompanying progress bar
             with open(file=tarball_path, mode="wb") as file, pieces as bar:
@@ -180,6 +179,7 @@ def get_tarball(
                     file.write(data)
 
             
+            logger.success("Done!")
             logger.info("Checking for Destination Folder")
             # Provide the final destination for the extracted files, since it doesn't exist
             if not Path(destination_path).exists():

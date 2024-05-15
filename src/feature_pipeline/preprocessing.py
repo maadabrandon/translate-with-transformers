@@ -70,7 +70,10 @@ class BilingualData(Dataset):
         )
 
         self.source_lang_vocab = self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
-        self.source_lang_vocab = self.en_field.build_vocab(self.translation_data, min_freq=2)
+        self.en_vocab = self.en_field.build_vocab(self.translation_data, min_freq=2)
+
+        self.source_lang_vocab_size = len(self.source_lang_vocab)
+        self.en_vocab_size = len(self.en_vocab)
 
 
     def _load_text(self, language: str) -> list[str]:
@@ -224,10 +227,11 @@ class DataSplit():
     def _save_file_as_txt(self, data_split: list[str], file_name: str):
 
         with open(self.split_data_path/file_name, mode="w", encoding="utf-8") as text:
-            
-            logger.info("Writing the strings to the file")
 
-            for strings in tqdm(data_split):
+            split_pieces = tqdm(data_split)
+
+            for strings in split_pieces:
+                split_pieces.set_description("Writing the strings to the file...")
                 text.write(strings)
     
     
@@ -288,16 +292,17 @@ class TransformerInputs():
             [
                 torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64),
                 torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
+                torch.tensor([self.decoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
 
         self.label = torch.cat(
             [   
                 torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                torch.tensor([self.decoder_input_tokens["<SOS>"]], dtype=torch.int64), 
-                torch.tensor([data.pad_id] * self.decoder_num_padding_tokens, dtype=torch.int64)
-            ]
+                torch.tensor([self.decoder_input_tokens["<EOS>"]], dtype=torch.int64), 
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
+            ],
+            dim=0
         )
 
         assert self.encoder_input.size(0) == self.seq_length
@@ -350,7 +355,7 @@ class TransformerInputs():
         }
 
 
-    def _causal_mask(size: int) -> bool: 
+    def _causal_mask(size: int) -> torch.Tensor: 
         """
         Make a matrix of ones whose upper triangular part is full of zeros.
 
@@ -358,7 +363,7 @@ class TransformerInputs():
             size (int): the second and third dimensions of the matrix.
 
         Returns:
-            bool: return all the values above the diagonal, which should be the
+            torch.Tensor: return all the values above the diagonal, which should be the
                   upper triangular part.
         """
         mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int)
