@@ -71,12 +71,12 @@ def run_training_loop(
 ):
     global_step = 0
     logger.info("Collecting training data...")
-
-    # Initialise the relevant data object
     data = BilingualData(source_lang=source_lang) 
     
-    # Instantiate the transformer inputs and split the data as we see fit
+    logger.info("Gathering model inputs...")
     model_inputs = TransformerInputs(seq_length=30, data=data)
+
+    logger.info("Splitting the data...")
     data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
 
     # Get the training dataloader
@@ -110,7 +110,7 @@ def run_training_loop(
 
     logger.info("Training...")
     for epoch in range(num_epochs):
-        logger.info(f"Starting Epoch {epoch+1}")
+        logger.info(f"Starting Epoch {epoch+1}...")
 
         # Put the model in training mode
         model_fn.train()

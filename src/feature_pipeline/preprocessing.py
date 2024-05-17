@@ -69,8 +69,11 @@ class BilingualData(Dataset):
             fields=(self.source_lang_field, self.en_field)
         )
 
-        self.source_lang_vocab = self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
-        self.en_vocab = self.en_field.build_vocab(self.translation_data, min_freq=2)
+        self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
+        self.en_field.build_vocab(self.translation_data, min_freq=2)
+
+        self.source_lang_vocab = self.source_lang_field.vocab
+        self.en_vocab = self.en_field.vocab
 
         self.source_lang_vocab_size = len(self.source_lang_vocab)
         self.en_vocab_size = len(self.en_vocab)
@@ -273,41 +276,45 @@ class TransformerInputs():
 
     def __init__(self, seq_length: int, data: BilingualData) -> None:
         self.seq_length = seq_length
-        self.encoder_input_tokens = data._retrieve_tokens()[0].values()
-        self.decoder_input_tokens = data._retrieve_tokens()[1].values()
+        self.encoder_input_tokens = data._retrieve_tokens()[0]
+        self.decoder_input_tokens = data._retrieve_tokens()[1]
+        
+        self.sos_id_tensor = torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64)
+        self.eos_id_tensor = torch.tensor([self.encoder_input_tokens["<EOS>"]], dtype=torch.int64)
+        self.pad_id_tensor = torch.tensor([self.encoder_input_tokens["<PAD>"]], dtype=torch.int64)
 
         self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
         self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
-        
+
         self.encoder_input = torch.cat(
             [
-                torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64),
-                torch.tensor(self.encoder_input_tokens, dtype=torch.int64),
-                self.encoder_input_tokens["<EOS>"],
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64)
+                self.sos_id_tensor,
+                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64),
+                self.eos_id_tensor,
+                torch.tensor([self.encoder_input_tokens["<PA D>"]] * self.encoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
 
         self.decoder_input = torch.cat(
-            [
-                torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64),
-                torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
+            [   
+                self.sos_id_tensor,
+                torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
                 torch.tensor([self.decoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
             ]
         )
 
         self.label = torch.cat(
             [   
-                torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                torch.tensor([self.decoder_input_tokens["<EOS>"]], dtype=torch.int64), 
+                torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
+                self.eos_id_tensor, 
                 torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64)
-            ],
-            dim=0
+            ], dim=0
         )
 
         assert self.encoder_input.size(0) == self.seq_length
         assert self.decoder_input.size(0) == self.seq_length
         assert self.label.size(0) == self.seq_length
+
 
 
     def _enough_tokens(self, seq_length: int) -> ValueError:
@@ -354,6 +361,19 @@ class TransformerInputs():
                             & self._causal_mask(size=self.decoder_input.size(0))
         }
 
+    def _print(self):
+        """
+        A temporary method to be used to diagnose a dimensional
+        issue with the tensors in the encoder input
+        """
+        for tensor in [
+                self.sos_id_tensor,
+                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64),
+                self.eos_id_tensor,
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64)
+            ]:
+
+            print(tensor.size())
 
     def _causal_mask(size: int) -> torch.Tensor: 
         """
@@ -366,12 +386,13 @@ class TransformerInputs():
             torch.Tensor: return all the values above the diagonal, which should be the
                   upper triangular part.
         """
-        mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int)
+        mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int64)
         return mask == 0
 
 
 if __name__ == "__main__":
 
-    for language in languages.values():
-        if language != "de":
-            DataSplit(source_lang=language, train_size=0.7, val_size=0.2)._split_data()
+    TransformerInputs(
+        seq_length=20,
+        data=BilingualData(source_lang="de")
+    )._print()
