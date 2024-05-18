@@ -2,6 +2,7 @@ import os
 from pathlib import Path 
 
 PARENT_DIR = Path("_file_").parent.resolve()
+os.chdir(path=PARENT_DIR)
 
 DATA_DIR = PARENT_DIR/"data"
 ORIGINAL_DATA_DIR = DATA_DIR/"originals"
@@ -31,5 +32,10 @@ def make_path_to_tokens(source_lang: str):
         
 
 if __name__ == "__main__":
+
+    from src.feature_pipeline.data_sourcing import languages
+
     make_fundamental_paths()
-    make_path_to_tokens()
+
+    for language in languages.values():
+        make_path_to_tokens(source_lang=language)

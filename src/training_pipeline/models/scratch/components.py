@@ -54,7 +54,7 @@ class PositionalEncoding(Module):
         positional_encoding[:, 1::2] = torch.cos(position * divisor_term)
 
         # Reshape the tensor so that it has shape (1, seq_length, d_model)
-        positional_encoding.unsqueeze(9)
+        positional_encoding.unsqueeze(0)
 
         # Save the encoding as a buffer. A buffer is a named tensor whose value
         # has no impact on gradients. In other words, buffers are not learned.
@@ -147,13 +147,11 @@ class MultiHeadAttention(Module):
         key: torch.Tensor,
         value: torch.Tensor,
         dropout: Dropout,
-        mask
+        mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute the self-attention scores using the scaled dot-product
-        attention formula.
+        Compute the self-attention scores using the scaled dot-product attention formula.
         """
-
         # The size of the embedding (feature) dimension of the query
         d_k = query.shape[-1]
 
@@ -182,7 +180,7 @@ class MultiHeadAttention(Module):
             q (torch.Tensor): the query tensor
             k (torch.Tensor): the key tensor
             v (torch.Tensor): the value tensor
-            mask (_type_): _description_
+            mask (torch.Tensor): 
 
         Returns:
             torch.Tensor: _description_

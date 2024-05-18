@@ -42,22 +42,14 @@ def get_optimizer(
     Returns:
         Adam, SGD, & RMSprop: the optimizer that will be returned.
     """
-    optimizers_and_likely_spellings = {
-        ("adam", "Adam"): Adam(params=model_fn.parameters(), lr=learning_rate, weight_decay=weight_decay),
-        ("sgd", "SGD"): SGD(params=model_fn.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum),
-        ("rms", "rmsprop", "RMSprop", "RMSProp"): RMSprop(params=model_fn.parameters(), weight_decay=weight_decay, momentum=momentum)
-    }
+    if optimizer_name == "Adam" or "adam" or None:
+        return Adam(params=model_fn.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    optimizer_with_each_spelling = {
-        spelling: optimizer for spellings, function in optimizers_and_likely_spellings.items() for spelling in spellings
-    }
+    elif optimizer_name == "sgd" or "SGD":
+        return SGD(params=model_fn.parameters(), lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
 
-    if optimizer_name in optimizer_with_each_spelling.keys():
-        return optimizer_with_each_spelling[optimizer_name]
-
-    # Make Adam the default if no optimizer is specified
-    elif optimizer_name is None:
-        return optimizer_with_each_spelling["Adam"]
+    elif optimizer_name in ["rms", "rmsprop", "RMSprop", "RMSProp"]:
+        return RMSprop(params=model_fn.parameters(), weight_decay=weight_decay, momentum=momentum)
 
     else:
         raise NotImplementedError("We only accept the Adam, SGD, and RMS optimizers")
@@ -76,7 +68,7 @@ def run_training_loop(
     logger.info("Gathering model inputs...")
     model_inputs = TransformerInputs(seq_length=30, data=data)
 
-    logger.info("Splitting the data...")
+    logger.info("Initialising data split object...")
     data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
 
     # Get the training dataloader
@@ -98,7 +90,7 @@ def run_training_loop(
             d_model=512,
             d_ff=512,
             num_blocks=6,
-            heads=5
+            heads=8
     )
 
     model_fn = get_model().to(device=device)
@@ -109,14 +101,17 @@ def run_training_loop(
     loss_fn = loss_fn.to(device=device)
 
     logger.info("Training...")
-    for epoch in range(num_epochs):
-        logger.info(f"Starting Epoch {epoch+1}...")
+
+    epoch_segments = tqdm(range(num_epochs))
+    epoch_count = 1
+    for epoch in epoch_segments:
+
+        epoch_segments.set_description(f"Running {epoch_count}")
 
         # Put the model in training mode
         model_fn.train()
-
-        batch_iterator = tqdm(train_loader, desc=f"Processing epoch {epoch+1}")
-        for batch in batch_iterator:
+        
+        for batch in train_iterator:
 
             # Prepare transformer inputs and labels
             encoder_input = model_inputs.__getitem__()["encoder_input"].to(device)
@@ -166,6 +161,8 @@ def run_training_loop(
                     "global_step": global_step
                 }
             )
+
+        epoch_count += 1
 
 
 if __name__ == "__main__":
