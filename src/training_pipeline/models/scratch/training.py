@@ -61,7 +61,7 @@ def run_training_loop(
     batch_size: int,
     save: bool
 ):
-    global_step = 0
+    training_loss = 0.0
     logger.info("Collecting training data...")
     data = BilingualData(source_lang=source_lang) 
     
@@ -71,9 +71,8 @@ def run_training_loop(
     logger.info("Initialising data split object...")
     data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
 
-    # Get the training dataloader
-    train_loader = data_split._make_data_loaders(source_lang=source_lang)[0]
-    train_iterator = iter(train_loader)
+    # Get the training set's dataloader
+    train_loader = data_split._make_data_loaders(batch_size=batch_size, split="training")
 
     logger.info("Setting training device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -100,25 +99,23 @@ def run_training_loop(
     optimizer = get_optimizer(model_fn=model_fn, learning_rate=0.01, optimizer_name="adam", weight_decay=0.001, momentum=None)
     loss_fn = loss_fn.to(device=device)
 
-    logger.info("Training...")
+    # Put the model in training mode
+    model_fn.train()
 
-    epoch_segments = tqdm(range(num_epochs))
     epoch_count = 1
+    epoch_segments = tqdm(range(num_epochs))
+
+    logger.info("Training...")
     for epoch in epoch_segments:
-
-        epoch_segments.set_description(f"Running {epoch_count}")
-
-        # Put the model in training mode
-        model_fn.train()
+        epoch_segments.set_description(desc=f"Running Epoch {epoch_count}")
         
-        for batch in train_iterator:
-
+        for _ in tqdm(train_loader):
             # Prepare transformer inputs and labels
-            encoder_input = model_inputs.__getitem__()["encoder_input"].to(device)
-            decoder_input = model_inputs.__getitem__()["decoder_input"].to(device)
-            encoder_mask = model_inputs.__getitem__()["encoder_mask"].to(device)
-            decoder_mask = model_inputs.__getitem__()["decoder_mask"].to(device)
-            label = model_inputs.__getitem__()["label"].to(device)
+            encoder_input = model_inputs.__getitem__()["encoder_input"].to(device=device)
+            decoder_input = model_inputs.__getitem__()["decoder_input"].to(device=device)
+            encoder_mask = model_inputs.__getitem__()["encoder_mask"].to(device=device)
+            decoder_mask = model_inputs.__getitem__()["decoder_mask"].to(device=device)
+            label = model_inputs.__getitem__()["label"].to(device=device)
 
             # Run the inputs through the transformer
             encoder_output = model_fn._encode(input=encoder_input, source_mask=encoder_mask)
@@ -132,7 +129,7 @@ def run_training_loop(
 
             projected_output = model_fn._project(x=decoder_output)
 
-            # Calculate the cross-entropy loss using the projected output and the 
+            # Calculate the cross-entropy loss using the projected output and the labels
             training_loss = loss_fn(
                 projected_output.view(-1, data.en_vocab_size), label.view(-1)
             )
@@ -149,7 +146,8 @@ def run_training_loop(
             optimizer.step()
             optimizer.zero_grad()            
 
-            global_step += 1
+            training_loss += training_loss.item()
+        
 
         if save:
 
@@ -166,10 +164,4 @@ def run_training_loop(
 
 
 if __name__ == "__main__":
-
-    run_training_loop(
-        source_lang="de",
-        num_epochs=20,
-        batch_size=20, 
-        save=True
-    )
+    run_training_loop(source_lang="de", num_epochs=20, batch_size=20, save=True)

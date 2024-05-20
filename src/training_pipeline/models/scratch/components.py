@@ -2,10 +2,9 @@
 In this module, we detail the components of the transformer based on
 the paper which introduced the architecture: "Attention is All You Need"
 """
-
 import torch
 from math import sqrt, log
-from torch.nn import Linear, Module,  Dropout, Embedding, Parameter, ModuleList
+from torch.nn import Linear, Module, Dropout, Embedding, Parameter, ModuleList
 
 
 class InputEmbedding(Module):
@@ -65,7 +64,7 @@ class PositionalEncoding(Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ensure that autograd does not consider this tensor when adjusting gradients.
         x += self.encoding[:, :x.shape[1], :].requires_grad_(mode=False)
-        return self.dropout.forward(x=x)
+        return self.dropout.forward(x)
 
 
 class LayerNormalization(Module):
@@ -157,7 +156,7 @@ class MultiHeadAttention(Module):
 
         # There is a dimensional change: (Batch, seq_length, d_k) --> (Batch, seq_length, seq_length)
         attention_scores = (query @ key.transpose(dim0=-2, dim1=-1)) / sqrt(d_k)
-        attention_scores.masked_fill_(mask == 0, value=-1e9) if mask is not None else None
+        attention_scores.masked_fill_(mask = mask, value=-1e9) if mask is not None else None
         attention_scores = attention_scores.softmax(dim=-1)
 
         if dropout is not None:
@@ -325,6 +324,7 @@ class DecoderBlock(Module):
             x=x,
             sublayer=self.feed_forward
         )
+        return x
 
 
 class Decoder(Module):
@@ -434,5 +434,5 @@ class Transformer(Module):
             target_mask=target_mask
         )
 
-    def _project(self, x: torch.Tensor):
+    def _project(self, x: torch.Tensor) -> torch.Tensor:
         return self.projection_layer.forward(x=x)

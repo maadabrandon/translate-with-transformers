@@ -236,7 +236,6 @@ class DataSplit():
     def _save_file_as_txt(self, data_split: list[str], file_name: str):
         
         if f"{file_name}" not in os.listdir(self.path_to_split_data):
-
             logger.info("Saving split data files for data loader creation...")
 
             with open(self.path_to_split_data/file_name, mode="w", encoding="utf-8") as text:
@@ -246,14 +245,14 @@ class DataSplit():
                     split_pieces.set_description("Writing the strings to the file...")
                     text.write(strings)
         else:
-            logger.success(f"{file_name} was already true!")
+            logger.success(f"{file_name} has already been saved")
     
     
     def _make_translation_dataset(self) -> tuple[TranslationDataset, TranslationDataset, TranslationDataset]:
         """
         Create the translation dataset object by fetching the saved training, validation, and testing data
         """
-        self.train, self.val, self.test = TranslationDataset.splits(
+        return TranslationDataset.splits(
             fields=(self.data.source_lang_field, self.data.en_field),
             exts=(self.data.source_text_name, self.data.en_text_name),
             path=self.path_to_split_data,
@@ -262,24 +261,39 @@ class DataSplit():
             test="test_" 
         )
 
-        return self.train, self.val, self.test
 
+    def _make_data_loaders(self, batch_size: int, split: str) -> tuple[DataLoader, DataLoader, DataLoader]:
+        """
+        Split the data into training, validation, testing sets, generate their corresponding data loaders,
+        and return them.
 
-    def _make_data_loaders(self, source_lang: str) -> tuple[DataLoader, DataLoader, DataLoader]:
-        
-        # Split the data, and save the splits as separate .txt files
+        Returns:
+            tuple[DataLoader, DataLoader, DataLoader]: the training, validation, and testing dataloaders.
+            split   (str): whether the training, validation, or test dataloader is to be produced.
+        """
+        # Split the data, and save the splits as separate text files
         self._split_data()
 
-        # Get the training, validation, and test data as objects of Pytorch's DataSet class
+        # Get the training, validation, and test data as objects of Pytorch's Dataset class
         train_data, val_data, test_data = self._make_translation_dataset()
 
         # Using a batch size of 20 for now
-        train_dataloader =  DataLoader(dataset=train_data, batch_size=20, shuffle=True)
-        val_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
-        test_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
+        train_dataloader =  DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
+        val_dataloader = DataLoader(dataset=val_data, batch_size=batch_size, shuffle=True)
+        test_dataloader = DataLoader(dataset=test_data, batch_size=batch_size, shuffle=True)
 
-        return train_dataloader, val_dataloader, test_dataloader
-    
+        # I am using yield statements here because returning all three dataloader results in an error 
+        # when this function is called to get the training dataloader during the training loop.
+        if "train" in split:
+            yield train_dataloader
+
+        elif "val" in split:
+            yield val_dataloader
+
+        elif "test" in split:
+            yield test_dataloader
+
+
     
 class TransformerInputs():
 
@@ -288,9 +302,9 @@ class TransformerInputs():
         self.encoder_input_tokens = data._retrieve_tokens()[0]
         self.decoder_input_tokens = data._retrieve_tokens()[1]
         
-        self.sos_id_tensor = torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64).unsqueeze(0)
-        self.eos_id_tensor = torch.tensor([self.encoder_input_tokens["<EOS>"]], dtype=torch.int64).unsqueeze(0)
-        self.pad_id_tensor = torch.tensor([self.encoder_input_tokens["<PAD>"]], dtype=torch.int64).unsqueeze(0)
+        self.sos_id_tensor = torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64).unsqueeze(dim=0)
+        self.eos_id_tensor = torch.tensor([self.encoder_input_tokens["<EOS>"]], dtype=torch.int64).unsqueeze(dim=0)
+        self.pad_id_tensor = torch.tensor([self.encoder_input_tokens["<PAD>"]], dtype=torch.int64).unsqueeze(dim=0)
 
         self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
         self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
@@ -298,26 +312,26 @@ class TransformerInputs():
         self.encoder_input = torch.cat(
             [
                 self.sos_id_tensor,
-                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64),
+                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64).unsqueeze(1),
                 self.eos_id_tensor,
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64).unsqueeze(0)
-            ], dim=1
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
+            ], dim=0
         )
 
         self.decoder_input = torch.cat(
             [   
                 self.sos_id_tensor,
                 torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
-                torch.tensor([self.decoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(0)
-            ], dim=1
+                torch.tensor([self.decoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
+            ], dim=0
         )
 
         self.label = torch.cat(
             [   
                 torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
                 self.eos_id_tensor, 
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(0)
-            ], dim=1
+                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
+            ], dim=0
         )
 
     def _enough_tokens(self, seq_length: int) -> ValueError:
@@ -359,10 +373,11 @@ class TransformerInputs():
             "label": self.label,
             "encoder_input": self.encoder_input,
             "decoder_input": self.decoder_input, 
-            "encoder_mask": (self.encoder_input != self.encoder_input_tokens["<PAD>"]).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
-            "decoder_mask": (self.decoder_input != self.decoder_input_tokens["<PAD>"]).unsqueeze(dim=0).unsqueeze(dim=0).int() \
-                            & self._causal_mask(size=self.decoder_input.size(0))
+            "encoder_mask": (self.encoder_input != self.pad_id_tensor).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
+            "decoder_mask": (self.decoder_input != self.pad_id_tensor).unsqueeze(dim=0).unsqueeze(dim=0).int() \
+                            & self._causal_mask(size=self.decoder_input.size(dim=0))
         }
+
 
     def _print_sizes(self):
         """
@@ -371,7 +386,7 @@ class TransformerInputs():
         """
         for tensor in [
                 self.sos_id_tensor,
-                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64),
+                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64).unsqueeze(1),
                 self.eos_id_tensor,
                 torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64).unsqueeze(0)
             ]:
@@ -397,6 +412,6 @@ class TransformerInputs():
 if __name__ == "__main__":
 
     TransformerInputs(
-        seq_length=31000,
-        data=BilingualData(source_lang="de")
-    )._print_sizes()
+        seq_length=31000, data=BilingualData(source_lang="de")
+    )._print_sizes() 
+    
