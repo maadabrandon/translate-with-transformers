@@ -9,9 +9,10 @@ from torch.utils.data import DataLoader
 from torch.optim import Adam, SGD, RMSprop
 from torch.utils.tensorboard import SummaryWriter
 
-from src.training_pipeline.models.scratch.components import Transformer
-from src.training_pipeline.models.scratch.construction import build_transformer
-from src.feature_pipeline.preprocessing import BilingualData, DataSplit, TransformerInputs
+from src.training_pipeline.models.components import Transformer
+from src.training_pipeline.models.construction import build_transformer
+from src.feature_pipeline.preprocessing import BilingualData, DataSplit
+from src.feature_pipeline.scratch.model_inputs import TransformerInputs
 
 
 def get_optimizer(
@@ -165,3 +166,4 @@ def run_training_loop(
 
 if __name__ == "__main__":
     run_training_loop(source_lang="de", num_epochs=20, batch_size=20, save=True)
+    

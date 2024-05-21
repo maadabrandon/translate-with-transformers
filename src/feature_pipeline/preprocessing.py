@@ -1,6 +1,6 @@
 import os 
+import spacy
 import json
-
 import torch
 from pathlib import Path
 
@@ -11,18 +11,22 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
-from torchtext.data import Field, BucketIterator
+from transformers import MBartTokenizer, MBartForConditionalGeneration
+
+from torchtext.data import Field
 from torchtext.datasets import TranslationDataset
 from torch.utils.data import Dataset, DataLoader
 
-from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, TOKENS_DIR, make_path_to_tokens
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, make_path_to_tokens
 from src.feature_pipeline.data_sourcing import languages, allow_full_language_names
 
 
 class BilingualData(Dataset):
 
-    def __init__(self, source_lang: str) -> None:
+    def __init__(self, source_lang: str, tokenizer_name: str = "WordLevel") -> None:
         
+        self.tokenizer_name = tokenizer_name
+
         # Make it so that full source language names are also accepted
         self.source_lang = allow_full_language_names(source_lang=source_lang)
 
@@ -31,7 +35,7 @@ class BilingualData(Dataset):
 
         # The directories where the data and its tokenizers will be saved
         self.folder_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
-        self.tokens_path = TOKENS_DIR/f"{self.source_lang}-en"
+        self.tokens_path = self._set_tokens_path()
 
         # The paths to the tokens
         self.source_tokens_path = self.tokens_path/f"{self.source_lang}_tokens.json"
@@ -102,13 +106,25 @@ class BilingualData(Dataset):
         return lines  
 
 
-    def _tokenize(self, dataset:list[str], token_file_name: str) -> dict:
+    def _set_tokens_path(self) -> Path:
+
+        if "wordlevel" in self.tokenizer_name.lower():
+            return WORD_lEVEL_TOKENS_DIR/f"{self.source_lang}-en" 
+
+        elif "mbart" in self.tokenizer_name.lower():
+            return MBART_TOKENS_DIR/f"{self.source_lang}-en"
+
+        else:
+            raise NotImplementedError("Requested tokenizer has not (yet) been implemented")
+
+
+    def _tokenize(self, text: list[str], token_file_name: str, language: str|None) -> dict:
         """
         Use HuggingFace's word level tokenizer to tokenize the text file, and save 
         the tokens. 
 
         Args:
-            dataset (list[str]): the file which contains our text.
+            text (list[str]): the file which contains our text.
             token_file_name (str): the name of the .json file to be created which 
                                    contains all the tokens and their IDs.
 
@@ -116,30 +132,80 @@ class BilingualData(Dataset):
             dict: .json file that contains the tokens and their corresponding IDs
         """
         if not Path(self.tokens_path/token_file_name).exists():
+            
+            if "wordlevel" in self.tokenizer_name.lower():
 
-            # If an unknown word is encountered, the tokenizer will map it to the number which corresponds to "UNK"
-            tokenizer = Tokenizer(
-                model=WordLevel(unk_token="UNK")
-            )   
+                # If an unknown word is encountered, the tokenizer call it "UNK", and tokenize it.
+                tokenizer = Tokenizer(
+                    model=WordLevel(unk_token="<UNK>")
+                )   
+            
+                # Choose the whitespace pre-tokenizer 
+                tokenizer.pre_tokenizer = Whitespace()
+                trainer = WordLevelTrainer(special_tokens=["<UNK>", "<PAD>", "<SOS>", "<EOS>"], min_frequency=2)
+
+                # Perform tokenization
+                tokenizer.train_from_iterator(iterator=text, trainer=trainer)
+
+                # Save the tokens
+                tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+
+
+            elif "mbart" in self.tokenizer_name.lower():
+                
+                tokenizer = MBartTokenizer.from_pretrained("facebook/mbart-large-50")
+                tokenizer.add_special_tokens(
+                    special_tokens_dict={
+                        "unk_token": "<UNK>",
+                        "sos_token": "<SOS>", 
+                        "eos_token": "<EOS>",
+                        "pad_token": "<PAD>"
+                    }
+                )
+
+                sentences = self._segment_sentences(text=text, language=language)
+                encoded_text = tokenizer(text=text, padding=True, truncation=True)
+
+                tokenized_sentences = []
+
+                for i, sentence in enumerate(sentences):
+                    tokenized_sentences.append({
+                            "input_sentence": sentence,
+                            "tokens": tokenizer.convert_ids_to_tokens(encoded_text["input_ids"][i].tolist()),
+                            "ids": encoded_text["input_ids"][i].tolist()
+                        })
+
+                if language == self.source_lang:
+                    tokens_path = self.source_tokens_path
+                elif language == "en":
+                    tokens_path = self.en_tokens_path
+                    
+                with open(tokens_path, mode="w") as file:
+                    json.dump(tokenized_sentences)
+
+                
+    def _segment_sentences(self, text: list[str], language: str):
         
-            # Choose the whitespace pre-tokenizer 
-            tokenizer.pre_tokenizer = Whitespace()
-            trainer = WordLevelTrainer(special_tokens=["<UNK>", "<PAD>", "<SOS>", "<EOS>"], min_frequency=2)
+        if language == self.source_lang:
+            loader = spacy.load(name=f"{self.source_lang}_core_web_sm")
+        elif language == "en":
+            loader = spacy.load(name="en_core_web_sm")
 
-            # Perform tokenization
-            tokenizer.train_from_iterator(iterator=dataset, trainer=trainer)
+        processed_text = loader(text=text)
+        sentences = [sent.text for sent in processed_text.sents]
 
-            # Save the tokens
-            tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+        return sentences
 
 
     def _retrieve_tokens(self) -> tuple[dict, dict]:
 
-        with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
-            source_tokens = json.load(file1)
-            en_tokens = json.load(file2)
+        if "word_level" in self.tokenizer_name:
+            with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
+                source_tokens = json.load(file1)
+                en_tokens = json.load(file2)
 
-        return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
+            return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
+
 
             
 
@@ -172,10 +238,6 @@ class DataSplit():
 
         self.path_to_split_data = self._make_path_to_split_data()
         self.num_splits_made = len(os.listdir(self.path_to_split_data))
-
-        #assert self.encoder_input.size(0) == self.seq_length
-        #assert self.decoder_input.size(0) == self.seq_length
-        #assert self.label.size(0) == self.seq_length
 
     def _make_path_to_split_data(self) -> str:
 
@@ -292,126 +354,3 @@ class DataSplit():
 
         elif "test" in split:
             yield test_dataloader
-
-
-    
-class TransformerInputs():
-
-    def __init__(self, seq_length: int, data: BilingualData) -> None:
-        self.seq_length = seq_length
-        self.encoder_input_tokens = data._retrieve_tokens()[0]
-        self.decoder_input_tokens = data._retrieve_tokens()[1]
-        
-        self.sos_id_tensor = torch.tensor([self.encoder_input_tokens["<SOS>"]], dtype=torch.int64).unsqueeze(dim=0)
-        self.eos_id_tensor = torch.tensor([self.encoder_input_tokens["<EOS>"]], dtype=torch.int64).unsqueeze(dim=0)
-        self.pad_id_tensor = torch.tensor([self.encoder_input_tokens["<PAD>"]], dtype=torch.int64).unsqueeze(dim=0)
-
-        self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
-        self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
-
-        self.encoder_input = torch.cat(
-            [
-                self.sos_id_tensor,
-                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64).unsqueeze(1),
-                self.eos_id_tensor,
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
-            ], dim=0
-        )
-
-        self.decoder_input = torch.cat(
-            [   
-                self.sos_id_tensor,
-                torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
-                torch.tensor([self.decoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
-            ], dim=0
-        )
-
-        self.label = torch.cat(
-            [   
-                torch.tensor([list(self.decoder_input_tokens.values())], dtype=torch.int64),
-                self.eos_id_tensor, 
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.decoder_num_padding_tokens, dtype=torch.int64).unsqueeze(dim=0)
-            ], dim=0
-        )
-
-    def _enough_tokens(self, seq_length: int) -> ValueError:
-        """
-        A checker that produces an error if the number of input tokens 
-        into the encoder or decoder is too high.
-
-        Args:
-            seq_length (int): the maximum length of each sentence.
-
-        Raises:
-            ValueError: an error message that indicates an excessive 
-                        number of input tokens into the encoder or
-                        decoder.
-        """
-
-        if self.encoder_num_padding_tokens < 0 or self.decoder_num_padding_tokens < 0:
-            raise ValueError("Sentence is too long")
-
-
-    def __getitem__(self) -> dict:
-        """
-        Return the encoder and decoder inputs, which are both of dimension 
-        (seq_length, ), as well as the encoder and decoder masks.
-        
-        We also establish the encoder and decoder masks. The encoder mask 
-        includes the elements of the encoder input that are not padding 
-        tokens.
-
-        The decoder mask is meant to ensure that each word in the decoder 
-        only watches words that come before it. It does this by zeroing out
-        the upper triangular part of a matrix.
-
-        The masked encoder and decoder inuts are twice unsqueezed with respect 
-        to the first dimension. Doing this adds sequence and batch dimensions
-        to the tensors in the mask.
-        """
-        return {
-            "label": self.label,
-            "encoder_input": self.encoder_input,
-            "decoder_input": self.decoder_input, 
-            "encoder_mask": (self.encoder_input != self.pad_id_tensor).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
-            "decoder_mask": (self.decoder_input != self.pad_id_tensor).unsqueeze(dim=0).unsqueeze(dim=0).int() \
-                            & self._causal_mask(size=self.decoder_input.size(dim=0))
-        }
-
-
-    def _print_sizes(self):
-        """
-        A temporary method to be used to diagnose a dimensional
-        issue with the tensors in the encoder input
-        """
-        for tensor in [
-                self.sos_id_tensor,
-                torch.tensor([list(self.encoder_input_tokens.values())], dtype=torch.int64).unsqueeze(1),
-                self.eos_id_tensor,
-                torch.tensor([self.encoder_input_tokens["<PAD>"]] * self.encoder_num_padding_tokens, dtype=torch.int64).unsqueeze(0)
-            ]:
-
-            print(tensor.size())
-            
-
-    def _causal_mask(size: int) -> torch.Tensor: 
-        """
-        Make a matrix of ones whose upper triangular part is full of zeros.
-
-        Args:
-            size (int): the second and third dimensions of the matrix.
-
-        Returns:
-            torch.Tensor: return all the values above the diagonal, which should be the
-                  upper triangular part.
-        """
-        mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int64)
-        return mask == 0
-
-
-if __name__ == "__main__":
-
-    TransformerInputs(
-        seq_length=31000, data=BilingualData(source_lang="de")
-    )._print_sizes() 
-    
