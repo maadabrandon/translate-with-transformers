@@ -14,7 +14,7 @@ from loguru import logger
 from src.setup.paths import ORIGINAL_DATA_DIR
 
 # The languages for which data is available
-languages = {
+source_languages = {
     "bulgarian": "bg", 
     "czech": "cs", 
     "french": "fr",
@@ -34,7 +34,12 @@ languages = {
     "slovenian": "sl",
     "slovene":"sl",
     "swedish": "sv"
-    }
+}
+
+english = {
+
+}
+
 
 
 def download_data(source_lang: str, keep_tarball: bool|None = True):
@@ -126,7 +131,7 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
                 keep_tarball=keep_tarball
             )
     else:
-        raise Exception("No data in the language you requested exists in the source data.")
+        raise Exception("Data in the requested source language is unavailable")
 
 
 def get_tarball(
@@ -223,7 +228,7 @@ def available_language(source_lang: str) -> bool:
     Returns:
         bool: whether or not the language is available.
     """
-    if source_lang.lower() not in languages.keys() and source_lang.lower() not in languages.values():
+    if source_lang.lower() not in source_languages.keys() and source_lang.lower() not in source_languages.values():
         return False
     else:
         return True
@@ -375,16 +380,19 @@ def allow_full_language_names(source_lang: str):
     it will be converted into its abbreviated form for later use 
     elsewhere in the code. 
     """
-    if source_lang.lower() in languages.keys():
-        return languages[source_lang.lower()] 
+    if source_lang.lower() in source_languages.keys():
+        return source_languages[source_lang.lower()] 
 
-    elif source_lang.lower() in languages.values():
+    elif source_lang.lower() in source_languages.values():
         return source_lang.lower()
+
+    else:
+        raise NotImplementedError("Data in the requested source language is unavailable")
 
 
 if __name__== "__main__":
 
-    for language in languages.keys():
+    for language in source_languages.keys():
         download_data(
             source_lang=allow_full_language_names(source_lang=language), 
             keep_tarball=False

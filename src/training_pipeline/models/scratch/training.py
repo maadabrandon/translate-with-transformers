@@ -4,7 +4,6 @@ from tqdm import tqdm
 from loguru import logger
 
 from torch.nn import CrossEntropyLoss
-from torch.utils.data import DataLoader
 
 from torch.optim import Adam, SGD, RMSprop
 from torch.utils.tensorboard import SummaryWriter
@@ -74,6 +73,7 @@ def run_training_loop(
 
     # Get the training set's dataloader
     train_loader = data_split._make_data_loaders(batch_size=batch_size, split="training")
+    batch_iterator = tqdm(train_loader)
 
     logger.info("Setting training device...")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -107,8 +107,9 @@ def run_training_loop(
     epoch_segments = tqdm(range(num_epochs))
 
     logger.info("Training...")
-    for epoch in epoch_segments:
+    for epoch in batch_iterator:
         epoch_segments.set_description(desc=f"Running Epoch {epoch_count}")
+        
         
         for _ in tqdm(train_loader):
             # Prepare transformer inputs and labels
@@ -136,7 +137,7 @@ def run_training_loop(
             )
 
             # Update progress bar with the computed loss
-            batch_iterator.set_postfix(ordered_dict={f"Training Loss": f"{training_loss.item():6.3f}"})
+            batch_iterator.set_postfix(ordered_dict={"Training Loss": f"{training_loss.item():6.3f}"})
 
             # Log the loss 
             SummaryWriter.add_scalar(tag="train_loss", scalar_value=training_loss.item(), global_step=True)
@@ -156,8 +157,7 @@ def run_training_loop(
                 {
                     "epoch": epoch+1,
                     "model_state": model_fn.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "global_step": global_step
+                    "optimizer_state_dict": optimizer.state_dict()
                 }
             )
 

@@ -27,19 +27,12 @@ def make_path_to_tokens(source_lang: str, path: Path):
     """
     Create the directories where the individualtokenizers are going to be stored.
     """
-    from src.feature_pipeline.data_sourcing import languages
+    from src.feature_pipeline.data_sourcing import source_languages
 
-    if source_lang.lower() in languages.keys() or languages.values():
-
+    if source_lang.lower() in source_languages.keys() or source_languages.values():
         if not Path(path/f"{source_lang}-en").exists():
             os.mkdir(path/f"{source_lang}-en")
         
 
 if __name__ == "__main__":
-
-    from src.feature_pipeline.data_sourcing import languages
-
     make_fundamental_paths()
-
-    for language in languages.values():
-        make_path_to_tokens(source_lang=language, path=MBART_TOKENS_DIR)
