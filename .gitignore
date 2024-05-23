@@ -5,6 +5,7 @@
 /.idea
 /models
 /tokens
+/spacy_objects
 **/__pycache__
 **OOP_data_sourcing.py
 **spacy_implementation.py

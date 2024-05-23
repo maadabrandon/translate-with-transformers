@@ -10,6 +10,7 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
+from spacy.util import Doc
 from transformers import MBart50Tokenizer
 
 from torchtext.data import Field
@@ -18,8 +19,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from src.feature_pipeline.data_sourcing import allow_full_language_names
 from src.feature_pipeline.pretrained.spacy_models import download_spacy_model, get_model_name
-from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR
-
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, SPACY_OBJECTS_DIR
 
 class BilingualData(Dataset):
 
@@ -146,7 +146,7 @@ class BilingualData(Dataset):
         token_file_name = f"{language}_tokens.json"
         if not Path(self.tokens_path/token_file_name).exists():
 
-            logger.info(f"Initialising {self.tokenizer_name} tokenizer")
+            logger.info(f"Initialising the {self.tokenizer_name} tokenizer")
             
             if "wordlevel" in self.tokenizer_name.lower():
 
@@ -227,17 +227,69 @@ class BilingualData(Dataset):
         spacy_model = spacy.load(name=model_name)
         text_string = self._make_text_into_one_string(text=text)
 
-        def __process_text_in_chunks(text_string: str, chunk_size: int):
+        def __process_text_in_chunks(text_string: str, chunk_size: int, save: bool = True) -> list[Doc]:
+            """
+            Use the spacy model to process chunks of the text, and return the processed file as a list
+            of the spacy Doc files (produced by the processing task). This output will be saved if 
+            requested.
+
+            Args:
+                text_string (str): the string which contains the full text to be processed by spacy
+                chunk_size (int): the number of characters to be processed at a time
+                save (bool): whether to save the list of spacy Doc files that will be generated
+
+            Returns:
+                list[Doc]: a list of Doc files produced by the processing
+            """
             chunks = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
+            logger.info(f"Using spacy to process the {language} text...")
             processed_chunks = [spacy_model(chunk) for chunk in tqdm(chunks)]
+
+            if save:
+                __save_processed_chunks(
+                    file_name=f"processed_{language}_text.spacy",
+                    processed_chunks=processed_chunks
+                )
+
             return processed_chunks
 
+        def __save_processed_chunks(file_name: str, processed_chunks: list[Doc]):
+            """
+            Use spacy's default serialization tools to save the list of Doc files that spacy 
+            produced during the processing stage.
+
+            Args:
+                file_name (str): the intended name of the file to be saved.
+
+                processed_chunks (list[Doc]): the list of Doc files that results from spacy 
+                                              processing the 
+            """
+            # Serialize the doc objects in the processed chunks
+            serialized_chunks = [doc_chunk.to_bytes() for doc_chunk in processed_chunks]
+
+            # Convert each doc file 
+            with open(SPACY_OBJECTS_DIR/file_name, mode="wb") as file:
+                for doc_chunk in processed_chunks:
+                    file.write(doc_chunk.to_bytes())
+                    file.write(b'\n\n') # Use double lines to separate doc objects
+
+        def __segment_sentences_in_the_chunks(processed_chunks: list[Doc]) -> list:
+            sentences = []
+            for chunk in processed_chunks:
+                sentences.extend(
+                    [sentence.text for sentence in chunk.sents]
+                )
+            return sentences 
+
         # Use spacy loader to process the text
-        processed_text = __process_text_in_chunks(text_string=text_string, chunk_size=spacy_model.max_length)
+        processed_text = __process_text_in_chunks(
+            text_string=text_string, 
+            chunk_size=spacy_model.max_length,
+            save=True
+        )
         
         # Segment string into sentences 
-        sentences = [sent.text for sent in tqdm(processed_text.sents)]
-
+        sentences = __segment_sentences_in_the_chunks(processed_chunks=processed_text)
         return sentences
 
     

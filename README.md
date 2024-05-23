@@ -9,6 +9,7 @@ I would be remiss however, if I didn't admit that I like the idea of building cu
     - I want to see and write as much Pytorch code as I possibly can (because I really like Pytorch), and this is an excuse to write some more.
 
 Because of this, I will aim to accomplish both things:
+
     - fine-tune a pretrained model (something I haven't done before).
     - build a transformer of my own from scratch (following the original architecture proposed in "Attention is All You Need"). 
 
