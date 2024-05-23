@@ -294,10 +294,8 @@ def missing_data_files(path: Path, source_lang: str) -> bool:
 
     if both_data_files_exist(path=path, source_lang=source_lang):
         return False
-
     elif num_files < 2:
         return True
-
     else: 
         logger.warning("There are more files in the folder than there should be. Please investigate")
         return False
@@ -374,20 +372,25 @@ def extract_missing_files(tarball_path: Path, destination_path: Path, source_lan
             archive.extract(member=missing_file_names[i], path=destination_path)
             
 
-def allow_full_language_names(source_lang: str):
+def allow_full_language_names(language: str) -> str:
     """
-    Ensure that if the full name of the source language is entered,
-    it will be converted into its abbreviated form for later use 
-    elsewhere in the code. 
+    Ensure that if the full name of the source language or the target language (English) 
+    is entered, it will be converted into its abbreviated form for later use elsewhere 
+    in the code. 
     """
-    if source_lang.lower() in source_languages.keys():
+    if language.lower() in source_languages.keys():
         return source_languages[source_lang.lower()] 
 
-    elif source_lang.lower() in source_languages.values():
-        return source_lang.lower()
+    elif language.lower() in source_languages.values():
+        return language.lower()
+
+    elif language.lower() in ["en", "eng", "english"]:
+        return "en"
 
     else:
         raise NotImplementedError("Data in the requested source language is unavailable")
+
+        
 
 
 if __name__== "__main__":

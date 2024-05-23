@@ -16,26 +16,25 @@ from torchtext.data import Field
 from torchtext.datasets import TranslationDataset
 from torch.utils.data import Dataset, DataLoader
 
-from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, make_path_to_tokens
 from src.feature_pipeline.data_sourcing import allow_full_language_names
-from src.feature_pipeline.pretrained.spacy_models import download_spacy_model
+from src.feature_pipeline.pretrained.spacy_models import download_spacy_model, get_model_name
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR
 
 
 class BilingualData(Dataset):
 
-    def __init__(self, source_lang: str, tokenizer_name: str = "WordLevel") -> None:
+    def __init__(self, source_lang: str, tokenizer_name: str) -> None:
         
         self.tokenizer_name = tokenizer_name
 
         # Make it so that full source language names are also accepted
-        self.source_lang = allow_full_language_names(source_lang=source_lang)
+        self.source_lang = allow_full_language_names(language=source_lang)
 
-        # The directories where the data and its tokenizers will be saved
-        self.folder_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
-        self.tokens_path = self._set_tokens_path()
+        # The directories where the data will be saved
+        self.data_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
 
-        # Make paths for the tokenizers if they don't already exist
-        make_path_to_tokens(source_lang=self.source_lang, path=self.tokens_path)
+        # Make the directories to the tokens if they don't already exist
+        self.tokens_path = self._set_tokens_dir()
 
         # The paths to the tokens
         self.source_tokens_path = self.tokens_path/f"{self.source_lang}_tokens.json"
@@ -46,21 +45,21 @@ class BilingualData(Dataset):
         self.source_text_name = f"europarl-v7.{self.source_lang}-en.{self.source_lang}"
 
         # The raw datasets themselves
-        self.en_text = self._load_text(language="en")   
+        self.en_text = self._load_text(language="en")
         self.source_text = self._load_text(language=self.source_lang)
 
-        # Tokenize the {source language} texts
+        # Tokenize the text in the source language
         self.source_lang_field = Field(
-            tokenize=self._tokenize(text=self.source_text, token_file_name=f"{self.source_lang}_tokens.json", language=source_lang),
+            tokenize=self._tokenize(text=self.source_text, language=self.source_lang),
             init_token="<BOS>",
             eos_token="<EOS>",
             pad_token="<PAD>",
             lower=True
-        )
+        )   
 
-        # Tokenize the English texts
+        # Tokenize the English text
         self.en_field = Field(
-            tokenize=self._tokenize(text=self.en_text, token_file_name="en_tokens.json", language="en"),
+            tokenize=self._tokenize(text=self.en_text, language="en"),
             init_token="<BOS>",
             eos_token="<EOS>",
             pad_token="<PAD>",
@@ -68,7 +67,7 @@ class BilingualData(Dataset):
         )
 
         self.translation_data = TranslationDataset(
-            path=f"{self.folder_path}/",
+            path=f"{self.data_path}/",
             exts=(self.source_text_name, self.en_text_name),
             fields=(self.source_lang_field, self.en_field)
         )
@@ -96,40 +95,39 @@ class BilingualData(Dataset):
             language or English.
         """
         if language in ["en", "english", "English"]:
-            with open(self.folder_path/self.en_text_name) as file:
+            with open(self.data_path/self.en_text_name) as file:
                 lines = file.readlines()
 
         elif language is self.source_lang:
-            with open(self.folder_path/self.source_text_name) as file:
+            with open(self.data_path/self.source_text_name) as file:
                 lines = file.readlines()
 
         return lines  
 
 
-    def _set_tokens_path(self) -> Path:
+    def _set_tokens_dir(self) -> Path:
         """
-        Return the path to the files containing the tokens and IDs for each source language/
-        english combination.
-
-        Raises:
-            NotImplementedError: only if a tokenizer that hasn't been 
-                                 implemented is requested
-
+        Create the directory houses the json files that contain the tokens and IDs for each source 
+        language/English combination, and return its path.
+        
         Returns:
             Path: the path to the tokens in question.
         """
+        tokenizers_and_paths = {
+            "wordlevel" : WORD_lEVEL_TOKENS_DIR/f"{self.source_lang}-en",
+            "mbart" : MBART_TOKENS_DIR/f"{self.source_lang}-en" 
+        }
 
-        if "wordlevel" in self.tokenizer_name.lower():
-            return WORD_lEVEL_TOKENS_DIR/f"{self.source_lang}-en" 
+        if self.tokenizer_name.lower() in tokenizers_and_paths.keys():
+            tokens_path = tokenizers_and_paths[self.tokenizer_name.lower()]
 
-        elif "mbart" in self.tokenizer_name.lower():
-            return MBART_TOKENS_DIR/f"{self.source_lang}-en"
+            if not Path(tokens_path).exists():
+                os.mkdir(tokens_path)
+                
+            return tokens_path
 
-        else:
-            raise NotImplementedError("Requested tokenizer has not (yet) been implemented")
 
-
-    def _tokenize(self, text: list[str], token_file_name: str, language: str|None) -> dict:
+    def _tokenize(self, text: list[str], language: str) -> dict:
         """
         Does one of the following:
         -    Use either HuggingFace's word level tokenizer to tokenize the text file, and save 
@@ -139,16 +137,16 @@ class BilingualData(Dataset):
         Args:
             text (list[str]): the file which contains our text.
 
-            token_file_name (str): the name of the .json file to be created which contains
-                                   all the tokens and their IDs.
-
             language (str): the language in which the text to be tokenized is written.
                             This argument only kicks in if MBart's tokenizer is being used.
 
         Returns:
             dict: .json file that contains the tokens and their corresponding IDs
         """
+        token_file_name = f"{language}_tokens.json"
         if not Path(self.tokens_path/token_file_name).exists():
+
+            logger.info(f"Initialising {self.tokenizer_name} tokenizer")
             
             if "wordlevel" in self.tokenizer_name.lower():
 
@@ -167,9 +165,8 @@ class BilingualData(Dataset):
                 # Save the tokens
                 tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
 
-
             elif "mbart" in self.tokenizer_name.lower():
-                
+
                 tokenizer = MBart50Tokenizer.from_pretrained("facebook/mbart-large-50")
                 tokenizer.add_special_tokens(
                     special_tokens_dict={
@@ -181,34 +178,34 @@ class BilingualData(Dataset):
                 )
 
                 sentences = self._segment_sentences(text=text, language=language)
-                encoded_text = tokenizer(text=text, padding=True, truncation=True)
+
+                logger.info("Tokenizing segmented text...")
+                encoded_text = tokenizer(text=sentences, padding=True, truncation=True)
 
                 tokenized_sentences = []
-
                 for i, sentence in enumerate(sentences):
                     tokenized_sentences.append(
                         {
                             "input_sentence": sentence,
-                            "tokens": tokenizer.convert_ids_to_tokens(encoded_text["input_ids"][i].tolist()),
-                            "ids": encoded_text["input_ids"][i].tolist()
+                            "tokens": tokenizer.convert_ids_to_tokens(encoded_text["input_ids"][i]),
+                            "ids": encoded_text["input_ids"][i]
                         }
                     )
 
-                if language == self.source_lang:
-                    tokens_path = self.source_tokens_path
-                elif language == "en":
-                    tokens_path = self.en_tokens_path
-                    
-                with open(tokens_path, mode="w") as file:
+                logger.info("Writing tokens and IDs to a json file")
+                with open(f"{self.tokens_path}/{token_file_name}", mode="w") as file:
                     json.dump(tokenized_sentences, fp=file)
 
             else:
-                raise NotImplementedError("Requested tokenizer has not (yet) been implemented")
+                raise NotImplementedError("Requested tokenizer has not been implemented")
 
-                
+        else:
+            logger.success(f"The {language} text has already been tokenized")
+
+
     def _segment_sentences(self, text: list[str], language: str) -> list[str]:
         """
-        Load a pre-trained model that will be used to iterate over the sentences
+        Load a pre-trained spacy model that will be used to iterate over the sentences
         in the text, and return a list contatining all these sentences.
 
         Args:
@@ -219,28 +216,56 @@ class BilingualData(Dataset):
         Returns:
             list[str]: a list containing the sentences
         """
-        model_name = f"{language}_core_news_sm"
+        # Download spacy model if necessary
+        model_name = get_model_name(language=language)
 
+        # Download spacy model if necessary
         if not spacy.util.is_package(name=model_name):
             download_spacy_model(source_lang=language)
 
-        loader = spacy.load(name=model_name)
+        # Load spacy model
+        spacy_model = spacy.load(name=model_name)
+        text_string = self._make_text_into_one_string(text=text)
 
-        processed_text = loader(text=text[0])
-        sentences = [sent.text for sent in processed_text.sents]
+        def __process_text_in_chunks(text_string: str, chunk_size: int):
+            chunks = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
+            processed_chunks = [spacy_model(chunk) for chunk in tqdm(chunks)]
+            return processed_chunks
+
+        # Use spacy loader to process the text
+        processed_text = __process_text_in_chunks(text_string=text_string, chunk_size=spacy_model.max_length)
+        
+        # Segment string into sentences 
+        sentences = [sent.text for sent in tqdm(processed_text.sents)]
 
         return sentences
 
+    
+    def _make_text_into_one_string(self, text: list[str]):
 
-    def _retrieve_tokens(self) -> tuple[dict, dict]:
+        text_string = ""
+        text_pieces = tqdm(text)
+        text_name = self.source_text_name if text is self.source_text else self.en_text_name
+        text_pieces.set_description(desc=f"Putting {text_name} into a single string")
+
+        for piece in text_pieces:
+            text_string += piece
+        return text_string
+
+
+    def _retrieve_tokens(self) -> tuple[dict, dict]|list :
+
+        with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
+            source_tokens = json.load(file1)
+            en_tokens = json.load(file2)
         
-        if "word_level" in self.tokenizer_name:
-
-            with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
-                source_tokens = json.load(file1)
-                en_tokens = json.load(file2)
-
+        if "word_level" in self.tokenizer_name.lower():
             return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
+
+        elif "mbart" in self.tokenizer_name.lower():
+            # Returning the contents of the files for now. I won't be sure whether ny parsing logic will be 
+            # necessary until I've seen how the MBart model works
+            return source_tokens, en_tokens
             
 
 class DataSplit():
@@ -389,7 +414,6 @@ class DataSplit():
 
         elif "test" in split:
             yield test_dataloader
-
 
 
 if __name__ == "__main__":
