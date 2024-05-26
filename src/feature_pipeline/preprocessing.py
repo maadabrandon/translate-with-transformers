@@ -10,7 +10,8 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
-from spacy.util import Doc
+from spacy.tokens import Doc
+from spacy.tokens import DocBin
 from transformers import MBart50Tokenizer
 
 from torchtext.data import Field
@@ -32,6 +33,9 @@ class BilingualData(Dataset):
 
         # The directories where the data will be saved
         self.data_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
+
+        # The directories where spacy objects will be saved
+        self.spacy_save_path = SPACY_OBJECTS_DIR/f"{self.source_lang}-en"
 
         # Make the directories to the tokens if they don't already exist
         self.tokens_path = self._set_tokens_dir()
@@ -221,7 +225,7 @@ class BilingualData(Dataset):
 
         # Download spacy model if necessary
         if not spacy.util.is_package(name=model_name):
-            download_spacy_model(source_lang=language)
+            download_spacy_model(language=language)
 
         # Load spacy model
         spacy_model = spacy.load(name=model_name)
@@ -243,17 +247,23 @@ class BilingualData(Dataset):
             """
             chunks = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
             logger.info(f"Using spacy to process the {language} text...")
-            processed_chunks = [spacy_model(chunk) for chunk in tqdm(chunks)]
+
+            doc_bin = DocBin()
+            for doc in tqdm(spacy_model.pipe(texts=chunks)):
+                doc_bin.add(doc=doc)
+            
+            # Serialize the DocBin object
+            bytes_data = doc_bin.to_bytes()
 
             if save:
                 __save_processed_chunks(
                     file_name=f"processed_{language}_text.spacy",
-                    processed_chunks=processed_chunks
+                    bytes_data=bytes_data
                 )
 
             return processed_chunks
 
-        def __save_processed_chunks(file_name: str, processed_chunks: list[Doc]):
+        def __save_processed_chunks(file_name: str, bytes_data: bytes):
             """
             Use spacy's default serialization tools to save the list of Doc files that spacy 
             produced during the processing stage.
@@ -264,29 +274,48 @@ class BilingualData(Dataset):
                 processed_chunks (list[Doc]): the list of Doc files that results from spacy 
                                               processing the 
             """
-            # Serialize the doc objects in the processed chunks
-            serialized_chunks = [doc_chunk.to_bytes() for doc_chunk in processed_chunks]
+            
+            if not Path(self.spacy_save_path).exists():
+                os.mkdir(self.spacy_save_path)
 
             # Convert each doc file 
-            with open(SPACY_OBJECTS_DIR/file_name, mode="wb") as file:
-                for doc_chunk in processed_chunks:
-                    file.write(doc_chunk.to_bytes())
-                    file.write(b'\n\n') # Use double lines to separate doc objects
+            with open(self.spacy_save_path/file_name, mode="wb") as file:
+                file.write(bytes_data)
+
+        def __load_processed_chunks(file_name: str) -> Doc:
+            """
+            Load the saved language object by deserializing a binary 
+            string that may have saved been saved after processing.
+
+            Args:
+                file_name (str): the name of the possibly saved binary file 
+
+            Returns:
+                spacy.Language: the Language object that was obtained from 
+                                deserialization
+            """
+            return spacy.blank(f"{language}").from_disk(path=self.spacy_save_path/file_name)
 
         def __segment_sentences_in_the_chunks(processed_chunks: list[Doc]) -> list:
             sentences = []
-            for chunk in processed_chunks:
+
+            logger.info("Segmenting sentences in each chunk of processed text...")
+            for chunk in tqdm(processed_chunks):
                 sentences.extend(
                     [sentence.text for sentence in chunk.sents]
                 )
             return sentences 
 
-        # Use spacy loader to process the text
-        processed_text = __process_text_in_chunks(
-            text_string=text_string, 
-            chunk_size=spacy_model.max_length,
-            save=True
-        )
+        if not Path(self.spacy_save_path/f"processed_{language}_text.spacy").exists():
+            # Use spacy loader to process the text
+            processed_text = __process_text_in_chunks(
+                text_string=text_string, 
+                chunk_size=spacy_model.max_length,
+                save=True
+            )
+        else:
+            logger.info(f"The processed {language} file already exists")
+            processed_text = __load_processed_chunks(file_name=f"processed_{language}_text.spacy")
         
         # Segment string into sentences 
         sentences = __segment_sentences_in_the_chunks(processed_chunks=processed_text)
@@ -469,4 +498,4 @@ class DataSplit():
 
 
 if __name__ == "__main__":
-    BilingualData(source_lang="de", tokenizer_name="mbart")
+    BilingualData(source_lang="lt", tokenizer_name="mbart")

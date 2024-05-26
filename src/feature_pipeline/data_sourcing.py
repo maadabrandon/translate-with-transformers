@@ -6,12 +6,13 @@ need to take care of the possibility of things like missing data.
 
 import os 
 import tarfile 
-import requests 
+import requests
 
 from tqdm import tqdm
 from pathlib import Path 
 from loguru import logger 
 from src.setup.paths import ORIGINAL_DATA_DIR
+
 
 # The languages for which data is available
 source_languages = {
@@ -35,11 +36,6 @@ source_languages = {
     "slovene":"sl",
     "swedish": "sv"
 }
-
-english = {
-
-}
-
 
 
 def download_data(source_lang: str, keep_tarball: bool|None = True):
@@ -400,3 +396,4 @@ if __name__== "__main__":
             source_lang=allow_full_language_names(source_lang=language), 
             keep_tarball=False
         )
+

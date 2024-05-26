@@ -2,8 +2,10 @@ from transformers import MBartForConditionalGeneration
 from transformers import Trainer, TrainingArguments
 
 from src.setup.paths import PRETRAINED_DIR
+from src.feature_pipeline.preprocessing import DataSplit
 
 model = MBartForConditionalGeneration.from_pretrained("facebook/mbart-large-50")
+
 
 training_args = TrainingArguments(
     output_dir=PRETRAINED_DIR/"artifacts",
@@ -18,3 +20,5 @@ trainer = Trainer(
     args=training_args,
     train_dataset=
 )
+
+
