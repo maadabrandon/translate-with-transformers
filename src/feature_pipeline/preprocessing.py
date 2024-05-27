@@ -20,7 +20,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from src.feature_pipeline.data_sourcing import allow_full_language_names
 from src.feature_pipeline.pretrained.spacy_models import download_spacy_model, get_model_name
-from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, SPACY_OBJECTS_DIR
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, DOC_BINS_DIR
 
 class BilingualData(Dataset):
 
@@ -35,7 +35,7 @@ class BilingualData(Dataset):
         self.data_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
 
         # The directories where spacy objects will be saved
-        self.spacy_save_path = SPACY_OBJECTS_DIR/f"{self.source_lang}-en"
+        self.doc_bins_path = DOC_BINS_DIR/f"{self.source_lang}-en"
 
         # Make the directories to the tokens if they don't already exist
         self.tokens_path = self._set_tokens_dir()
@@ -231,99 +231,75 @@ class BilingualData(Dataset):
         spacy_model = spacy.load(name=model_name)
         text_string = self._make_text_into_one_string(text=text)
 
-        def __process_text_in_chunks(text_string: str, chunk_size: int, save: bool = True) -> list[Doc]:
+        def __process_text_in_chunks(text_string: str, chunk_size: int):
             """
-            Use the spacy model to process chunks of the text, and return the processed file as a list
-            of the spacy Doc files (produced by the processing task). This output will be saved if 
-            requested.
-
+            Use the spacy model to process chunks of the text, into an iterable containing Doc objects
+            and place those objects into an instance of the DocBin class. These DocBin objects will then 
+            be then saved to disk.
+            
             Args:
                 text_string (str): the string which contains the full text to be processed by spacy
                 chunk_size (int): the number of characters to be processed at a time
-                save (bool): whether to save the list of spacy Doc files that will be generated
 
-            Returns:
-                list[Doc]: a list of Doc files produced by the processing
             """
-            chunks = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
+            chunks_of_text = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
             logger.info(f"Using spacy to process the {language} text...")
-
-            doc_bin = DocBin()
-            for doc in tqdm(spacy_model.pipe(texts=chunks)):
-                doc_bin.add(doc=doc)
             
-            # Serialize the DocBin object
-            bytes_data = doc_bin.to_bytes()
+            for chunk in tqdm(chunks_of_text):
+                doc_bin = DocBin()
+                file_name = f"chunk_{chunks_of_text.index(chunk)}_processed.spacy"
+                
+                if file_name not in os.listdir(self.doc_bins_path):
+                    for doc in spacy_model.pipe(texts=chunk): 
+                        doc_bin.add(doc=doc)
+                        __save_processed_chunk(doc_bin=doc_bin, file_name=file_name)
 
-            if save:
-                __save_processed_chunks(
-                    file_name=f"processed_{language}_text.spacy",
-                    bytes_data=bytes_data
-                )
-
-            return processed_chunks
-
-        def __save_processed_chunks(file_name: str, bytes_data: bytes):
+        def __save_processed_chunk(doc_bin: DocBin, file_name: str):
             """
-            Use spacy's default serialization tools to save the list of Doc files that spacy 
-            produced during the processing stage.
+            Serialize the DocBin object that spacy produced after processing, and save it to disk.
 
             Args:
                 file_name (str): the intended name of the file to be saved.
-
-                processed_chunks (list[Doc]): the list of Doc files that results from spacy 
-                                              processing the 
             """
-            
-            if not Path(self.spacy_save_path).exists():
-                os.mkdir(self.spacy_save_path)
+            if not Path(self.doc_bins_path).exists():
+                os.mkdir(self.doc_bins_path)
 
-            # Convert each doc file 
-            with open(self.spacy_save_path/file_name, mode="wb") as file:
-                file.write(bytes_data)
+            doc_bin.to_disk(path=self.doc_bins_path/file_name)
 
-        def __load_processed_chunks(file_name: str) -> Doc:
+        def __load_processed_chunks() -> list[DocBin]:
             """
-            Load the saved language object by deserializing a binary 
-            string that may have saved been saved after processing.
-
-            Args:
-                file_name (str): the name of the possibly saved binary file 
+            Deserialize the saved binaries into DocBin.
 
             Returns:
-                spacy.Language: the Language object that was obtained from 
-                                deserialization
+                list[Doc]: the list of Doc objects that we can iterate over to access the text, tokens
+                           or other entities that they contain.
             """
-            return spacy.blank(f"{language}").from_disk(path=self.spacy_save_path/file_name)
+            doc_bins = []
+            file_names = os.listdir(path=self.doc_bins_path)
 
-        def __segment_sentences_in_the_chunks(processed_chunks: list[Doc]) -> list:
+            for file_name in tqdm(file_names):
+                file_path = os.path.join(self.doc_bins_path, file_name)
+                with open(file_path, mode="rb") as file:
+                    doc_bin = DocBin().from_disk(path=file_path) # Load the file and deserialize it into a DocBin
+                    doc_bins.append(doc_bin)
+            return doc_bins
+
+        def __segment_sentences_in_the_chunks(doc_bins: list[DocBin]) -> list[str]:
             sentences = []
-
             logger.info("Segmenting sentences in each chunk of processed text...")
-            for chunk in tqdm(processed_chunks):
-                sentences.extend(
-                    [sentence.text for sentence in chunk.sents]
-                )
+
+            for doc_bin in tqdm(doc_bins):
+                for doc in doc_bin.get_docs(vocab=spacy_model.vocab):
+                    sentences.extend([sentence.text for sentence in doc.sents])
             return sentences 
 
-        if not Path(self.spacy_save_path/f"processed_{language}_text.spacy").exists():
-            # Use spacy loader to process the text
-            processed_text = __process_text_in_chunks(
-                text_string=text_string, 
-                chunk_size=spacy_model.max_length,
-                save=True
-            )
-        else:
-            logger.info(f"The processed {language} file already exists")
-            processed_text = __load_processed_chunks(file_name=f"processed_{language}_text.spacy")
-        
-        # Segment string into sentences 
-        sentences = __segment_sentences_in_the_chunks(processed_chunks=processed_text)
+        __process_text_in_chunks(text_string=text_string, chunk_size=spacy_model.max_length)
+        doc_bins = __load_processed_chunks()  
+        sentences = __segment_sentences_in_the_chunks(doc_bins=doc_bins)
         return sentences
 
     
     def _make_text_into_one_string(self, text: list[str]):
-
         text_string = ""
         text_pieces = tqdm(text)
         text_name = self.source_text_name if text is self.source_text else self.en_text_name

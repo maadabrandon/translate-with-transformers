@@ -1,15 +1,16 @@
 .env
 .ruff_cache
 
-/data
-/.idea
-/tokens
-/models
-/spacy_objects
-**/__pycache__
+*/__pycache__
+**requirements.txt
 **OOP_data_sourcing.py
 **spacy_implementation.py
 
 README.md
 
-**requirements.txt
+/data
+/.idea
+/tokens
+/models
+/spacy_objects
+/src/training_pipeline/models/pretrained/training.py
