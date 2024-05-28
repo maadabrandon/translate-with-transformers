@@ -18,9 +18,11 @@ from torchtext.data import Field
 from torchtext.datasets import TranslationDataset
 from torch.utils.data import Dataset, DataLoader
 
+
 from src.feature_pipeline.data_sourcing import allow_full_language_names
 from src.feature_pipeline.pretrained.spacy_models import download_spacy_model, get_model_name
 from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, DOC_BINS_DIR
+
 
 class BilingualData(Dataset):
 
@@ -96,16 +98,14 @@ class BilingualData(Dataset):
 
         Returns:
             list[str]: a list which contains the text in either the source 
-            language or English.
+           language or English.
         """
         if language in ["en", "english", "English"]:
             with open(self.data_path/self.en_text_name) as file:
                 lines = file.readlines()
-
         elif language is self.source_lang:
             with open(self.data_path/self.source_text_name) as file:
                 lines = file.readlines()
-
         return lines  
 
 
@@ -124,10 +124,8 @@ class BilingualData(Dataset):
 
         if self.tokenizer_name.lower() in tokenizers_and_paths.keys():
             tokens_path = tokenizers_and_paths[self.tokenizer_name.lower()]
-
             if not Path(tokens_path).exists():
                 os.mkdir(tokens_path)
-                
             return tokens_path
 
 
@@ -263,7 +261,6 @@ class BilingualData(Dataset):
             """
             if not Path(self.doc_bins_path).exists():
                 os.mkdir(self.doc_bins_path)
-
             doc_bin.to_disk(path=self.doc_bins_path/file_name)
 
         def __load_processed_chunks() -> list[DocBin]:
@@ -293,7 +290,7 @@ class BilingualData(Dataset):
                     sentences.extend([sentence.text for sentence in doc.sents])
             return sentences 
 
-        __process_text_in_chunks(text_string=text_string, chunk_size=spacy_model.max_length)
+        __process_text_in_chunks(text_string=text_string, chunk_size=100)
         doc_bins = __load_processed_chunks()  
         sentences = __segment_sentences_in_the_chunks(doc_bins=doc_bins)
         return sentences
@@ -311,18 +308,13 @@ class BilingualData(Dataset):
 
 
     def _retrieve_tokens(self) -> tuple[dict, dict]|list :
-
         with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
             source_tokens = json.load(file1)
             en_tokens = json.load(file2)
-        
         if "word_level" in self.tokenizer_name.lower():
             return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
-
         elif "mbart" in self.tokenizer_name.lower():
-            # Returning the contents of the files for now. I won't be sure whether ny parsing logic will be 
-            # necessary until I've seen how the MBart model works
-            return source_tokens, en_tokens
+            return source_tokens, en_tokens # Returning for now until I see the output of this tokenizer
             
 
 class DataSplit():

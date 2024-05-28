@@ -1,12 +1,10 @@
 .env
 .ruff_cache
 
-*/__pycache__
+**/__pycache__
 **requirements.txt
 **OOP_data_sourcing.py
 **spacy_implementation.py
-
-README.md
 
 /data
 /.idea

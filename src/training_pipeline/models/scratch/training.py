@@ -8,8 +8,8 @@ from torch.nn import CrossEntropyLoss
 from torch.optim import Adam, SGD, RMSprop
 from torch.utils.tensorboard import SummaryWriter
 
-from src.training_pipeline.models.components import Transformer
-from src.training_pipeline.models.construction import build_transformer
+from src.training_pipeline.models.scratch.components import Transformer
+from src.training_pipeline.models.scratch.construction import build_transformer
 from src.feature_pipeline.preprocessing import BilingualData, DataSplit
 from src.feature_pipeline.scratch.model_inputs import TransformerInputs
 
@@ -63,7 +63,7 @@ def run_training_loop(
 ):
     training_loss = 0.0
     logger.info("Collecting training data...")
-    data = BilingualData(source_lang=source_lang) 
+    data = BilingualData(source_lang=source_lang, tokenizer_name="wordlevel") 
     
     logger.info("Gathering model inputs...")
     model_inputs = TransformerInputs(seq_length=30, data=data)
