@@ -2,10 +2,9 @@
 In this module, we detail the components of the transformer based on
 the paper which introduced the architecture: "Attention is All You Need"
 """
-
 import torch
 from math import sqrt, log
-from torch.nn import Linear, Module,  Dropout, Embedding, Parameter, ModuleList
+from torch.nn import Linear, Module, Dropout, Embedding, Parameter, ModuleList
 
 
 class InputEmbedding(Module):
@@ -54,7 +53,7 @@ class PositionalEncoding(Module):
         positional_encoding[:, 1::2] = torch.cos(position * divisor_term)
 
         # Reshape the tensor so that it has shape (1, seq_length, d_model)
-        positional_encoding.unsqueeze(9)
+        positional_encoding.unsqueeze(0)
 
         # Save the encoding as a buffer. A buffer is a named tensor whose value
         # has no impact on gradients. In other words, buffers are not learned.
@@ -65,7 +64,7 @@ class PositionalEncoding(Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # Ensure that autograd does not consider this tensor when adjusting gradients.
         x += self.encoding[:, :x.shape[1], :].requires_grad_(mode=False)
-        return self.dropout.forward(x=x)
+        return self.dropout.forward(x)
 
 
 class LayerNormalization(Module):
@@ -147,19 +146,17 @@ class MultiHeadAttention(Module):
         key: torch.Tensor,
         value: torch.Tensor,
         dropout: Dropout,
-        mask
+        mask: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Compute the self-attention scores using the scaled dot-product
-        attention formula.
+        Compute the self-attention scores using the scaled dot-product attention formula.
         """
-
         # The size of the embedding (feature) dimension of the query
         d_k = query.shape[-1]
 
         # There is a dimensional change: (Batch, seq_length, d_k) --> (Batch, seq_length, seq_length)
         attention_scores = (query @ key.transpose(dim0=-2, dim1=-1)) / sqrt(d_k)
-        attention_scores.masked_fill_(mask == 0, value=-1e9) if mask is not None else None
+        attention_scores.masked_fill_(mask = mask, value=-1e9) if mask is not None else None
         attention_scores = attention_scores.softmax(dim=-1)
 
         if dropout is not None:
@@ -182,7 +179,7 @@ class MultiHeadAttention(Module):
             q (torch.Tensor): the query tensor
             k (torch.Tensor): the key tensor
             v (torch.Tensor): the value tensor
-            mask (_type_): _description_
+            mask (torch.Tensor): 
 
         Returns:
             torch.Tensor: _description_
@@ -251,7 +248,7 @@ class EncoderBlock(Module):
             modules=[SkipConnection(dropout=dropout) for _ in [0, 1]]
         )
 
-    def forward(self, x: torch.Tensor, source_mask) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, source_mask: torch.Tensor) -> torch.Tensor:
 
         # Apply the first skip connection to the input tensor x with the sublayer being the self-attention.
         x = self.skip_connections[0].forward(
@@ -270,7 +267,7 @@ class EncoderBlock(Module):
 
 class Encoder(Module):
 
-    def __init__(self, layers: ModuleList[EncoderBlock]) -> None:
+    def __init__(self, layers: ModuleList) -> None:
         super().__init__()
         self.layers = layers
         self.norm = LayerNormalization()
@@ -303,7 +300,13 @@ class DecoderBlock(Module):
             [SkipConnection(dropout=dropout) for _ in range(3)]
         )
 
-    def forward(self, x: torch.Tensor, encoder_output: torch.Tensor, source_mask, target_mask):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target_mask: torch.Tensor
+        ):
         # First skip connection
         x = self.skip_connections[0].forward(
             x=x,
@@ -321,16 +324,24 @@ class DecoderBlock(Module):
             x=x,
             sublayer=self.feed_forward
         )
+        return x
 
 
 class Decoder(Module):
 
-    def __init__(self, layers: ModuleList[DecoderBlock]):
+    def __init__(self, layers: ModuleList):
         super().__init__()
         self.layers = layers
         self.norm = LayerNormalization()
 
-    def forward(self, x: torch.Tensor, encoder_output: torch.Tensor, source_mask, target_mask):
+    def forward(
+        self, 
+        x: torch.Tensor, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target_mask:torch.Tensor
+        ):
+    
         for layer in self.layers:
             x = layer.forward(
                 x=x,
@@ -342,7 +353,7 @@ class Decoder(Module):
         return self.norm(x)
 
 
-class VocabProjectionLayer(Module):
+class ProjectionLayer(Module):
     """
     This is a linear map that acts on the embedding (feature) dimension and
     transforms its input tensor so that its feature dimension corresponds to
@@ -375,37 +386,43 @@ class Transformer(Module):
         self,
         encoder: Encoder,
         decoder: Decoder,
-        source_embed: InputEmbedding,
-        target_embed: InputEmbedding,
+        source_embedding: InputEmbedding,
+        target_embedding: InputEmbedding,
         source_position: PositionalEncoding,
         target_position: PositionalEncoding,
-        projection_layer: VocabProjectionLayer
-    ) -> None:
+        projection_layer: ProjectionLayer
+        ) -> None:
 
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
-        self.source_embed = source_embed
-        self.target_embed = target_embed
+        self.source_embedding = source_embedding
+        self.target_embedding = target_embedding
         self.source_position = source_position
         self.target_position = target_position
         self.projection_layer = projection_layer
 
 
-    def _encode(self, source, source_mask) -> torch.Tensor:
+    def _encode(self, input: torch.Tensor, source_mask: torch.Tensor) -> torch.Tensor:
 
         # Apply the input embedding and positional encoding to the data before it enters the encoder blocks
         source = self.source_position(
-            self.source_embed(source)
+            self.source_embedding.forward(input)
         )
 
         return self.encoder.forward(x=source, mask=source_mask)
 
 
-    def _decode(self, encoder_output: torch.Tensor, source_mask, target, target_mask) -> torch.Tensor:
+    def _decode(
+        self, 
+        encoder_output: torch.Tensor, 
+        source_mask: torch.Tensor, 
+        target: torch.Tensor,
+        target_mask: torch.Tensor
+        ) -> torch.Tensor:
 
         # Apply the output embedding to the input data
-        target = self.target_embed.forward(x=target)
+        target = self.target_embedding.forward(x=target)
 
         # Apply the positional embedding to the data before it enters the decoder blocks
         target = self.target_position.forward(x=target)
@@ -417,5 +434,5 @@ class Transformer(Module):
             target_mask=target_mask
         )
 
-    def _project(self, x: torch.Tensor):
+    def _project(self, x: torch.Tensor) -> torch.Tensor:
         return self.projection_layer.forward(x=x)

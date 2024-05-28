@@ -10,7 +10,7 @@ from torch.nn import init, ModuleList
 
 from src.training_pipeline.models.scratch.components import (
     InputEmbedding, PositionalEncoding, MultiHeadAttention, FeedForwardBlock, EncoderBlock, DecoderBlock, Decoder,
-    Encoder, VocabProjectionLayer, Transformer
+    Encoder, ProjectionLayer, Transformer
 )
 
 
@@ -106,22 +106,35 @@ def build_transformer(
     target_position = PositionalEncoding(d_model=d_model, seq_length=target_seq_length, dropout=dropout)
 
     # Assemble the encoder and decoder blocks
-    encoder_blocks = assemble_encoder_blocks(d_model=d_model, d_ff=d_ff, num_blocks=num_blocks, heads=heads)
-    decoder_blocks = assemble_decoder_blocks(d_model=d_model, d_ff=d_ff, num_blocks=num_blocks, heads=heads)
+    encoder_blocks = assemble_encoder_blocks(
+        d_model=d_model, 
+        d_ff=d_ff, 
+        num_blocks=num_blocks, 
+        dropout=dropout,
+        heads=heads
+    )
+
+    decoder_blocks = assemble_decoder_blocks(
+        d_model=d_model, 
+        d_ff=d_ff, 
+        num_blocks=num_blocks, 
+        dropout=dropout,
+        heads=heads
+    )
 
     # Initialise the encoder and decoder
     encoder = Encoder(layers=encoder_blocks)
     decoder = Decoder(layers=decoder_blocks)
 
     # Initialise the projection layer
-    projection_layer = VocabProjectionLayer(d_model=d_model, vocab_size=target_vocab_size)
+    projection_layer = ProjectionLayer(d_model=d_model, vocab_size=target_vocab_size)
 
     # Make the transformer from these components
     transformer = Transformer(
         encoder=encoder,
         decoder=decoder,
-        source_embed=source_embedding,
-        target_embed=target_embedding,
+        source_embedding=source_embedding,
+        target_embedding=target_embedding,
         source_position=source_position,
         target_position=target_position,
         projection_layer=projection_layer
@@ -132,7 +145,7 @@ def build_transformer(
     # initialization of weight matrices and scales them to avoid exploding and vanishing gradients.
     for parameter in transformer.parameters():
         if parameter.dim() > 1:
-             init.xavier_uniform(parameter)
+             init.xavier_uniform_(parameter)
     
     return transformer
      

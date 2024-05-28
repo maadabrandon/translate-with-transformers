@@ -6,15 +6,16 @@ need to take care of the possibility of things like missing data.
 
 import os 
 import tarfile 
-import requests 
+import requests
 
 from tqdm import tqdm
 from pathlib import Path 
 from loguru import logger 
 from src.setup.paths import ORIGINAL_DATA_DIR
 
+
 # The languages for which data is available
-languages = {
+source_languages = {
     "bulgarian": "bg", 
     "czech": "cs", 
     "french": "fr",
@@ -34,7 +35,7 @@ languages = {
     "slovenian": "sl",
     "slovene":"sl",
     "swedish": "sv"
-    }
+}
 
 
 def download_data(source_lang: str, keep_tarball: bool|None = True):
@@ -85,11 +86,11 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
             if not keep_tarball:
                 os.remove(path=tarball_path)
 
-            logger.success(f'The folder "{folder_name}" already exists')
+            logger.success(f"The folder {folder_name} already exists")
 
         # The folder exists, but not the tarball
         elif data_folder_exists(source_lang=source_lang) and not tarball_exists(source_lang=source_lang):
-            logger.success(f'The folder "{folder_name}" already exists')
+            logger.success(f"The folder {folder_name} already exists")
 
             logger.info("Checking for missing files...")
             if missing_data_files(path=destination_path, source_lang=source_lang):
@@ -119,14 +120,14 @@ def download_data(source_lang: str, keep_tarball: bool|None = True):
         # The data needs to be downloaded from scratch
         else:
             get_tarball(
-                source_lang=source_lang,
+                source_lang=source_lang, 
                 archive_name=archive_name, 
                 destination_path=destination_path, 
                 tarball_path=tarball_path,
                 keep_tarball=keep_tarball
             )
     else:
-        raise Exception("No data in the language you requested exists in the source data.")
+        raise Exception("Data in the requested source language is unavailable")
 
 
 def get_tarball(
@@ -170,8 +171,7 @@ def get_tarball(
                 total=int(response.headers.get("content-length", 0))
             )
 
-            logger.success("Done!")
-            logger.info(" Writing to disk...")
+            pieces.set_description(" Writing to disk...")
             
             # Save the download with an accompanying progress bar
             with open(file=tarball_path, mode="wb") as file, pieces as bar:
@@ -180,6 +180,7 @@ def get_tarball(
                     file.write(data)
 
             
+            logger.success("Done!")
             logger.info("Checking for Destination Folder")
             # Provide the final destination for the extracted files, since it doesn't exist
             if not Path(destination_path).exists():
@@ -223,7 +224,7 @@ def available_language(source_lang: str) -> bool:
     Returns:
         bool: whether or not the language is available.
     """
-    if source_lang.lower() not in languages.keys() and source_lang.lower() not in languages.values():
+    if source_lang.lower() not in source_languages.keys() and source_lang.lower() not in source_languages.values():
         return False
     else:
         return True
@@ -274,9 +275,8 @@ def fully_extract_tarball(archive_path: Path, destination_path: Path, keep_tarba
 
 
 def missing_data_files(path: Path, source_lang: str) -> bool:
-
     """
-    Looks into a given data folder, and determines whether :
+    Looks into a given data folder, and determines whether:
         - both data files exist
         - whether there is at least one missing file
         - whether there are more files than there should be 
@@ -286,15 +286,12 @@ def missing_data_files(path: Path, source_lang: str) -> bool:
               False if there are no missing files, and if 
               there are more files than there should be.
     """
-
     num_files = len(os.listdir(path=path)) 
 
     if both_data_files_exist(path=path, source_lang=source_lang):
         return False
-
     elif num_files < 2:
         return True
-
     else: 
         logger.warning("There are more files in the folder than there should be. Please investigate")
         return False
@@ -371,23 +368,32 @@ def extract_missing_files(tarball_path: Path, destination_path: Path, source_lan
             archive.extract(member=missing_file_names[i], path=destination_path)
             
 
-def allow_full_language_names(source_lang: str):
+def allow_full_language_names(language: str) -> str:
     """
-    Ensure that if the full name of the source language is entered,
-    it will be converted into its abbreviated form for later use 
-    elsewhere in the code. 
+    Ensure that if the full name of the source language or the target language (English) 
+    is entered, it will be converted into its abbreviated form for later use elsewhere 
+    in the code. 
     """
-    if source_lang.lower() in languages.keys():
-        return languages[source_lang.lower()] 
+    if language.lower() in source_languages.keys():
+        return source_languages[source_lang.lower()] 
 
-    elif source_lang.lower() in languages.values():
-        return source_lang.lower()
+    elif language.lower() in source_languages.values():
+        return language.lower()
+
+    elif language.lower() in ["en", "eng", "english"]:
+        return "en"
+
+    else:
+        raise NotImplementedError("Data in the requested source language is unavailable")
+
+        
 
 
 if __name__== "__main__":
 
-    for language in languages.keys():
+    for language in source_languages.keys():
         download_data(
             source_lang=allow_full_language_names(source_lang=language), 
             keep_tarball=False
         )
+

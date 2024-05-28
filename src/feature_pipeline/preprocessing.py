@@ -1,7 +1,6 @@
 import os 
+import spacy
 import json
-
-import torch
 from pathlib import Path
 
 from tqdm import tqdm
@@ -11,62 +10,82 @@ from tokenizers.models import WordLevel
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.pre_tokenizers import Whitespace
 
-from torchtext.data import Field, BucketIterator
+from spacy.tokens import Doc
+from spacy.tokens import DocBin
+from transformers import MBart50Tokenizer
+
+from torchtext.data import Field
 from torchtext.datasets import TranslationDataset
 from torch.utils.data import Dataset, DataLoader
 
-from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, TOKENS_DIR, make_path_to_tokens
-from src.feature_pipeline.data_sourcing import languages, allow_full_language_names
+
+from src.feature_pipeline.data_sourcing import allow_full_language_names
+from src.feature_pipeline.pretrained.spacy_models import download_spacy_model, get_model_name
+from src.setup.paths import DATA_DIR, ORIGINAL_DATA_DIR, WORD_lEVEL_TOKENS_DIR, MBART_TOKENS_DIR, DOC_BINS_DIR
 
 
-class BilingualData():
+class BilingualData(Dataset):
 
-    def __init__(self, source_lang: str) -> None:
+    def __init__(self, source_lang: str, tokenizer_name: str) -> None:
         
+        self.tokenizer_name = tokenizer_name
+
         # Make it so that full source language names are also accepted
-        self.source_lang = allow_full_language_names(source_lang=source_lang)
+        self.source_lang = allow_full_language_names(language=source_lang)
 
-        # Make paths for the tokenizers if they don't already exist
-        make_path_to_tokens(source_lang=self.source_lang)
+        # The directories where the data will be saved
+        self.data_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
 
-        # The directories where the data and its tokenizers will be saved
-        self.folder_path = ORIGINAL_DATA_DIR/f"{self.source_lang}-en"
-        self.tokens_path = TOKENS_DIR/f"{self.source_lang}-en"
+        # The directories where spacy objects will be saved
+        self.doc_bins_path = DOC_BINS_DIR/f"{self.source_lang}-en"
+
+        # Make the directories to the tokens if they don't already exist
+        self.tokens_path = self._set_tokens_dir()
+
+        # The paths to the tokens
+        self.source_tokens_path = self.tokens_path/f"{self.source_lang}_tokens.json"
+        self.en_tokens_path = self.tokens_path/"en_tokens.json"
 
         # The names of the files in the dataset
         self.en_text_name = f"europarl-v7.{self.source_lang}-en.en"
         self.source_text_name = f"europarl-v7.{self.source_lang}-en.{self.source_lang}"
 
         # The raw datasets themselves
-        self.en_text = self._load_text(language="en")   
+        self.en_text = self._load_text(language="en")
         self.source_text = self._load_text(language=self.source_lang)
 
-        # Tokenize the {source language} texts
+        # Tokenize the text in the source language
         self.source_lang_field = Field(
-            tokenize=self._tokenize(dataset=self.source_text, token_file_name=f"{self.source_lang}_tokens.json"),
-            init_token="<SOS>",
+            tokenize=self._tokenize(text=self.source_text, language=self.source_lang),
+            init_token="<BOS>",
             eos_token="<EOS>",
             pad_token="<PAD>",
             lower=True
-        )
+        )   
 
-        # Tokenize the English texts
+        # Tokenize the English text
         self.en_field = Field(
-            tokenize=self._tokenize(dataset=self.en_text, token_file_name="en_tokens.json"),
-            init_token="<SOS>",
+            tokenize=self._tokenize(text=self.en_text, language="en"),
+            init_token="<BOS>",
             eos_token="<EOS>",
             pad_token="<PAD>",
             lower=True
         )
 
         self.translation_data = TranslationDataset(
-            path=f"{self.folder_path}/",
+            path=f"{self.data_path}/",
             exts=(self.source_text_name, self.en_text_name),
             fields=(self.source_lang_field, self.en_field)
         )
 
-        self.source_lang_vocab = self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
-        self.source_lang_vocab = self.en_field.build_vocab(self.translation_data, min_freq=2)
+        self.source_lang_field.build_vocab(self.translation_data, min_freq=2)
+        self.en_field.build_vocab(self.translation_data, min_freq=2)
+
+        self.source_lang_vocab = self.source_lang_field.vocab
+        self.en_vocab = self.en_field.vocab
+
+        self.source_lang_vocab_size = len(self.source_lang_vocab)
+        self.en_vocab_size = len(self.en_vocab)
 
 
     def _load_text(self, language: str) -> list[str]:
@@ -79,48 +98,223 @@ class BilingualData():
 
         Returns:
             list[str]: a list which contains the text in either the source 
-            language or English.
+           language or English.
         """
         if language in ["en", "english", "English"]:
-            with open(self.folder_path/self.en_text_name) as file:
+            with open(self.data_path/self.en_text_name) as file:
                 lines = file.readlines()
-
         elif language is self.source_lang:
-            with open(self.folder_path/self.source_text_name) as file:
+            with open(self.data_path/self.source_text_name) as file:
                 lines = file.readlines()
-
         return lines  
 
 
-    def _tokenize(self, dataset:list[str], token_file_name: str) -> dict:
+    def _set_tokens_dir(self) -> Path:
         """
-        Use HuggingFace's word level tokenizer to tokenize the text file, and save 
-        the tokens. 
+        Create the directory houses the json files that contain the tokens and IDs for each source 
+        language/English combination, and return its path.
+        
+        Returns:
+            Path: the path to the tokens in question.
+        """
+        tokenizers_and_paths = {
+            "wordlevel" : WORD_lEVEL_TOKENS_DIR/f"{self.source_lang}-en",
+            "mbart" : MBART_TOKENS_DIR/f"{self.source_lang}-en" 
+        }
+
+        if self.tokenizer_name.lower() in tokenizers_and_paths.keys():
+            tokens_path = tokenizers_and_paths[self.tokenizer_name.lower()]
+            if not Path(tokens_path).exists():
+                os.mkdir(tokens_path)
+            return tokens_path
+
+
+    def _tokenize(self, text: list[str], language: str) -> dict:
+        """
+        Does one of the following:
+        -    Use either HuggingFace's word level tokenizer to tokenize the text file, and save 
+             the tokens, and their IDs.
+        -    Use the MBart50Tokenizer to tokenize the sentences in the text file, and save 
 
         Args:
-            dataset (list[str]): the file which contains our text.
-            token_file_name (str): the name of the .json file to be created which 
-                                   contains all the tokens and their IDs.
+            text (list[str]): the file which contains our text.
+
+            language (str): the language in which the text to be tokenized is written.
+                            This argument only kicks in if MBart's tokenizer is being used.
 
         Returns:
             dict: .json file that contains the tokens and their corresponding IDs
         """
+        token_file_name = f"{language}_tokens.json"
         if not Path(self.tokens_path/token_file_name).exists():
 
-            # If an unknown word is encountered, the tokenizer will map it to the number which corresponds to "UNK"
-            tokenizer = Tokenizer(
-                model=WordLevel(unk_token="UNK")
-            )   
-        
-            # Choose the whitespace pre-tokenizer 
-            tokenizer.pre_tokenizer = Whitespace()
-            trainer = WordLevelTrainer(special_tokens=["<UNK>", "<PAD>", "<SOS>", "<EOS>"], min_frequency=2)
+            logger.info(f"Initialising the {self.tokenizer_name} tokenizer")
+            
+            if "wordlevel" in self.tokenizer_name.lower():
 
-            # Perform tokenization
-            tokenizer.train_from_iterator(iterator=dataset, trainer=trainer)
+                # If an unknown word is encountered, the tokenizer call it "UNK", and tokenize it.
+                tokenizer = Tokenizer(
+                    model=WordLevel(unk_token="<UNK>")
+                )   
+            
+                # Choose the whitespace pre-tokenizer 
+                tokenizer.pre_tokenizer = Whitespace()
+                trainer = WordLevelTrainer(special_tokens=["<UNK>", "<PAD>", "<SOS>", "<EOS>"], min_frequency=2)
 
-            # Save the tokens
-            tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+                # Perform tokenization
+                tokenizer.train_from_iterator(iterator=text, trainer=trainer)
+
+                # Save the tokens
+                tokenizer.save(path=f"{self.tokens_path}/{token_file_name}")
+
+            elif "mbart" in self.tokenizer_name.lower():
+
+                tokenizer = MBart50Tokenizer.from_pretrained("facebook/mbart-large-50")
+                tokenizer.add_special_tokens(
+                    special_tokens_dict={
+                        "unk_token": "<UNK>",
+                        "bos_token": "<BOS>", 
+                        "eos_token": "<EOS>",
+                        "pad_token": "<PAD>"
+                    }
+                )
+
+                sentences = self._segment_sentences(text=text, language=language)
+
+                logger.info("Tokenizing segmented text...")
+                encoded_text = tokenizer(text=sentences, padding=True, truncation=True)
+
+                tokenized_sentences = []
+                for i, sentence in enumerate(sentences):
+                    tokenized_sentences.append(
+                        {
+                            "input_sentence": sentence,
+                            "tokens": tokenizer.convert_ids_to_tokens(encoded_text["input_ids"][i]),
+                            "ids": encoded_text["input_ids"][i]
+                        }
+                    )
+
+                logger.info("Writing tokens and IDs to a json file")
+                with open(f"{self.tokens_path}/{token_file_name}", mode="w") as file:
+                    json.dump(tokenized_sentences, fp=file)
+
+            else:
+                raise NotImplementedError("Requested tokenizer has not been implemented")
+
+        else:
+            logger.success(f"The {language} text has already been tokenized")
+
+
+    def _segment_sentences(self, text: list[str], language: str) -> list[str]:
+        """
+        Load a pre-trained spacy model that will be used to iterate over the sentences
+        in the text, and return a list contatining all these sentences.
+
+        Args:
+            text (list[str]): the raw text to be segmented into sentences
+            language (str): the language whose pretrained model will have to be
+                            loaded.
+
+        Returns:
+            list[str]: a list containing the sentences
+        """
+        # Download spacy model if necessary
+        model_name = get_model_name(language=language)
+
+        # Download spacy model if necessary
+        if not spacy.util.is_package(name=model_name):
+            download_spacy_model(language=language)
+
+        # Load spacy model
+        spacy_model = spacy.load(name=model_name)
+        text_string = self._make_text_into_one_string(text=text)
+
+        def __process_text_in_chunks(text_string: str, chunk_size: int):
+            """
+            Use the spacy model to process chunks of the text, into an iterable containing Doc objects
+            and place those objects into an instance of the DocBin class. These DocBin objects will then 
+            be then saved to disk.
+            
+            Args:
+                text_string (str): the string which contains the full text to be processed by spacy
+                chunk_size (int): the number of characters to be processed at a time
+
+            """
+            chunks_of_text = [text_string[i: i+chunk_size] for i in range(0, len(text_string), chunk_size)]
+            logger.info(f"Using spacy to process the {language} text...")
+            
+            for chunk in tqdm(chunks_of_text):
+                doc_bin = DocBin()
+                file_name = f"chunk_{chunks_of_text.index(chunk)}_processed.spacy"
+                
+                if file_name not in os.listdir(self.doc_bins_path):
+                    for doc in spacy_model.pipe(texts=chunk): 
+                        doc_bin.add(doc=doc)
+                        __save_processed_chunk(doc_bin=doc_bin, file_name=file_name)
+
+        def __save_processed_chunk(doc_bin: DocBin, file_name: str):
+            """
+            Serialize the DocBin object that spacy produced after processing, and save it to disk.
+
+            Args:
+                file_name (str): the intended name of the file to be saved.
+            """
+            if not Path(self.doc_bins_path).exists():
+                os.mkdir(self.doc_bins_path)
+            doc_bin.to_disk(path=self.doc_bins_path/file_name)
+
+        def __load_processed_chunks() -> list[DocBin]:
+            """
+            Deserialize the saved binaries into DocBin.
+
+            Returns:
+                list[Doc]: the list of Doc objects that we can iterate over to access the text, tokens
+                           or other entities that they contain.
+            """
+            doc_bins = []
+            file_names = os.listdir(path=self.doc_bins_path)
+
+            for file_name in tqdm(file_names):
+                file_path = os.path.join(self.doc_bins_path, file_name)
+                with open(file_path, mode="rb") as file:
+                    doc_bin = DocBin().from_disk(path=file_path) # Load the file and deserialize it into a DocBin
+                    doc_bins.append(doc_bin)
+            return doc_bins
+
+        def __segment_sentences_in_the_chunks(doc_bins: list[DocBin]) -> list[str]:
+            sentences = []
+            logger.info("Segmenting sentences in each chunk of processed text...")
+
+            for doc_bin in tqdm(doc_bins):
+                for doc in doc_bin.get_docs(vocab=spacy_model.vocab):
+                    sentences.extend([sentence.text for sentence in doc.sents])
+            return sentences 
+
+        __process_text_in_chunks(text_string=text_string, chunk_size=100)
+        doc_bins = __load_processed_chunks()  
+        sentences = __segment_sentences_in_the_chunks(doc_bins=doc_bins)
+        return sentences
+
+    
+    def _make_text_into_one_string(self, text: list[str]):
+        text_string = ""
+        text_pieces = tqdm(text)
+        text_name = self.source_text_name if text is self.source_text else self.en_text_name
+        text_pieces.set_description(desc=f"Putting {text_name} into a single string")
+
+        for piece in text_pieces:
+            text_string += piece
+        return text_string
+
+
+    def _retrieve_tokens(self) -> tuple[dict, dict]|list :
+        with open(self.source_tokens_path, mode="r") as file1, open(self.en_tokens_path, mode="r") as file2:
+            source_tokens = json.load(file1)
+            en_tokens = json.load(file2)
+        if "word_level" in self.tokenizer_name.lower():
+            return source_tokens["model"]["vocab"], en_tokens["model"]["vocab"]
+        elif "mbart" in self.tokenizer_name.lower():
+            return source_tokens, en_tokens # Returning for now until I see the output of this tokenizer
             
 
 class DataSplit():
@@ -131,8 +325,8 @@ class DataSplit():
         self.val_size = val_size
         self.test_size = 1 - self.train_size - self.val_size
 
-        self.data = BilingualData(source_lang=self.source_lang)
         self.source_lang = allow_full_language_names(source_lang=source_lang)
+        self.data = BilingualData(source_lang=self.source_lang)
 
         self.source_train_size = int(len(self.data.source_text) * self.train_size)
         self.source_val_size = int(len(self.data.source_text) * self.val_size)
@@ -150,11 +344,11 @@ class DataSplit():
         self.en_val_indices = list(range(self.en_val_size))
         self.en_test_indices = list(range(self.en_test_size))
 
-        self.split_data_path = self._make_split_data_path()
-        self.num_splits_made = len(os.listdir(self.split_data_path))
+        self.path_to_split_data = self._make_path_to_split_data()
+        self.num_splits_made = len(os.listdir(self.path_to_split_data))
 
 
-    def _make_split_data_path(self) -> str:
+    def _make_path_to_split_data(self) -> str:
 
         split_data_path = DATA_DIR/"split_data"/f"{self.source_lang}-en"
 
@@ -169,7 +363,7 @@ class DataSplit():
         We split the source and target datasets using the pre-defined proportions 
         of the training, validation and test sets, and then save these split files.
         """
-        logger.info("Creating splits for each language")
+        logger.info("Creating splits for each language...")
 
         self.source_train_data = [self.data.source_text[i] for i in self.source_train_indices]
         self.en_train_data = [self.data.en_text[i] for i in self.en_train_indices]
@@ -179,7 +373,7 @@ class DataSplit():
         
         self.source_test_data = [self.data.source_text[i] for i in self.source_test_indices]
         self.en_test_data = [self.data.en_text[i] for i in self.en_test_indices]
-        
+
         self._save_all_split_data()
 
 
@@ -199,168 +393,77 @@ class DataSplit():
 
         for option in tqdm(options.keys()):
             
-            logger.info(f"Saving Split {list(options.keys()).index(option)}")
-
+            if self.source_lang in option:
+                logger.info(f"Saving raw {option[0]}ing data for the {self.source_lang} version")
+            else:
+                logger.info(f"Saving raw {option[0]} data for the en version")
+    
             self._save_file_as_txt(
                 data_split=options[option],
                 file_name=f"{option[0]}_europarl-v7.{self.source_lang}-en.{option[1]}"
-            )
+            )   
 
 
     def _save_file_as_txt(self, data_split: list[str], file_name: str):
+        
+        if f"{file_name}" not in os.listdir(self.path_to_split_data):
+            logger.info("Saving split data files for data loader creation...")
 
-        with open(self.split_data_path/file_name, mode="w", encoding="utf-8") as text:
-            
-            logger.info("Writing the strings to the file")
+            with open(self.path_to_split_data/file_name, mode="w", encoding="utf-8") as text:
+                split_pieces = tqdm(data_split)
 
-            for strings in tqdm(data_split):
-                text.write(strings)
+                for strings in split_pieces:
+                    split_pieces.set_description("Writing the strings to the file...")
+                    text.write(strings)
+        else:
+            logger.success(f"{file_name} has already been saved")
     
     
     def _make_translation_dataset(self) -> tuple[TranslationDataset, TranslationDataset, TranslationDataset]:
         """
-        Create the translation dataset object by fetching the saved training, 
-        validation, and testing data
+        Create the translation dataset object by fetching the saved training, validation, and testing data
         """
-        self.train, self.val, self.test = TranslationDataset.splits(
+        return TranslationDataset.splits(
             fields=(self.data.source_lang_field, self.data.en_field),
             exts=(self.data.source_text_name, self.data.en_text_name),
-            path=self.split_data_path,
+            path=self.path_to_split_data,
             train="train_",
             validation="val_",
             test="test_" 
         )
 
-        return self.train, self.val, self.test
 
-
-def make_data_loaders(source_lang: str) -> tuple[DataLoader, DataLoader, DataLoader]:
-
-    # Fetch the raw data, and do all the preprocessing necessary to split the data, 
-    # and prepare it for training.
-    raw_data = BilingualData(source_lang=source_lang)
-
-    data_split = DataSplit(source_lang=source_lang, train_size=0.7, val_size=0.2)
-
-    # Split the data, and save the splits as separate .txt files
-    data_split._split_data()
-
-    # Get the training, validation, and test data as objects of Pytorch's DataSet class
-    train_data, val_data, test_data = data_split._make_translation_dataset()
-
-    # Using a batch size of 20 for now
-    train_dataloader =  DataLoader(dataset=train_data, batch_size=20, shuffle=True)
-    val_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
-    test_dataloader = DataLoader(dataset=val_data, batch_size=20, shuffle=True)
-
-    return train_dataloader, val_dataloader, test_dataloader
-    
-    
-class TransformerInputs():
-
-    def __init__(self, seq_length: int, data: BilingualData) -> None:
-        self.seq_length = seq_length
-        self.encoder_input_tokens = data.source_tokens.values()
-        self.decoder_input_tokens = data.en_tokens.values()
-        
-        self.encoder_num_padding_tokens = self.seq_length - len(self.encoder_input_tokens) - 2
-        self.decoder_num_padding_tokens = self.seq_length - len(self.decoder_input_tokens) - 1
-
-        self.encoder_input = torch.cat(
-            [
-                data.sos_id,
-                torch.tensor(self.encoder_input_tokens, dtype=torch.int64),
-                data.eos_id,
-                torch.tensor([data.pad_id] * self.encoder_num_padding_tokens, dtype=torch.int64)
-            ]
-        )
-
-        self.decoder_input = torch.cat(
-            [
-                data.sos_id,
-                torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                torch.tensor([data.pad_id] * self.decoder_num_padding_tokens, dtype=torch.int64)
-            ]
-        )
-
-        self.label = torch.cat(
-            [
-                torch.tensor(self.decoder_input_tokens, dtype=torch.int64),
-                data.eos_id, 
-                torch.tensor([data.pad_id] * self.decoder_num_padding_tokens, dtype=torch.int64)
-            ]
-        )
-
-        assert self.encoder_input.size(0) == self.seq_length
-        assert self.decoder_input.size(0) == self.seq_length
-        assert self.label.size(0) == self.seq_length
-
-
-    def _enough_tokens(self, seq_length: int) -> ValueError:
+    def _make_data_loaders(self, batch_size: int, split: str) -> tuple[DataLoader, DataLoader, DataLoader]:
         """
-        A checker that produces an error if the number of input tokens 
-        into the encoder or decoder is too high.
-
-        Args:
-            seq_length (int): the maximum length of each sentence.
-
-        Raises:
-            ValueError: an error message that indicates an excessive 
-                        number of input tokens into the encoder or
-                        decoder.
-        """
-
-        if self.encoder_num_padding_tokens < 0 or self.decoder_num_padding_tokens < 0:
-
-            raise ValueError("Sentence is too long")
-
-
-    def __get_items(self) -> dict:
-        """
-        Return the encoder and decoder inputs, which are both of dimension 
-        (seq_length, ), as well as the encoder and decoder masks.
-        
-        We also establish the encoder and decoder masks. The encoder mask 
-        includes the elements of the encoder input that are not padding 
-        tokens.
-
-        The decoder mask is meant to ensure that each word in the decoder 
-        only watches words that come before it. It does this by zeroing out
-        the upper triangular part of a matrix.
-
-        The masked encoder and decoder inuts are twice unsqueezed with respect 
-        to the first dimension. Doing this adds sequence and batch dimensions
-        to the tensors in the mask.
-        """
-        return {
-            "label": self.label,
-            "encoder_input": self.encoder_input,
-            "decoder_input": self.decoder_input, 
-            "encoder_mask": (self.encoder_input != self.pad_id).unsqueeze(dim=0).unsqueeze(dim=0).int(), 
-            "decoder_mask": (self.decoder_input != self.pad_id).unsqueeze(dim=0).unsqueeze(dim=0).int() \
-                            & self._causal_mask(size=self.decoder_input.size(0))
-        }
-
-
-    def _causal_mask(size: int) -> bool: 
-        """
-        Make a matrix of ones whose upper triangular part is full of zeros.
-
-        Args:
-            size (int): the second and third dimensions of the matrix.
+        Split the data into training, validation, testing sets, generate their corresponding data loaders,
+        and return them.
 
         Returns:
-            bool: return all the values above the diagonal, which should be the
-                  upper triangular part.
+            tuple[DataLoader, DataLoader, DataLoader]: the training, validation, and testing dataloaders.
+            split   (str): whether the training, validation, or test dataloader is to be produced.
         """
-        mask = torch.triu(input=torch.ones(1, size, size), diagonal=1).type(torch.int)
-        return mask == 0
+        # Split the data, and save the splits as separate text files
+        self._split_data()
+
+        # Get the training, validation, and test data as objects of Pytorch's Dataset class
+        train_data, val_data, test_data = self._make_translation_dataset()
+
+        # Using a batch size of 20 for now
+        train_dataloader =  DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
+        val_dataloader = DataLoader(dataset=val_data, batch_size=batch_size, shuffle=True)
+        test_dataloader = DataLoader(dataset=test_data, batch_size=batch_size, shuffle=True)
+
+        # I am using yield statements here because returning all three dataloader results in an error 
+        # when this function is called to get the training dataloader during the training loop.
+        if "train" in split:
+            yield train_dataloader
+
+        elif "val" in split:
+            yield val_dataloader
+
+        elif "test" in split:
+            yield test_dataloader
 
 
 if __name__ == "__main__":
-
-    for language in languages.values():
-
-        if language != "de":
-
-            make_data_loaders(source_lang=language)
+    BilingualData(source_lang="lt", tokenizer_name="mbart")
