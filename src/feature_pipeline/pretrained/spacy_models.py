@@ -11,7 +11,7 @@ def get_model_name(language: str) -> str:
 def download_spacy_model(language: str) -> None:
 
     # Check whether the language is among the available source languages
-    language = allow_full_language_names(language=language)
+    language = allow_full_language_names(lang=language)
     model_name = get_model_name(language=language)
 
     try:
